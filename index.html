@@ -93,9 +93,10 @@
 
       <div class="room-players-list" id="room-players-list"></div>
 
+      <div id="room-error" class="auth-error" style="margin-bottom:8px"></div>
       <div class="room-bottom-actions">
         <button class="btn btn-primary btn-large" id="btn-room-start" onclick="handleRoomStart()" style="display:none">Start Auction</button>
-        <button class="btn btn-secondary" id="btn-room-ready" onclick="handleToggleReady()">Ready</button>
+        <button class="btn btn-secondary" id="btn-room-ready" onclick="handleToggleReady()">READY</button>
         <button class="btn btn-secondary" onclick="handleLeaveRoom()" style="background:#333">Leave Room</button>
       </div>
     </div>
@@ -327,29 +328,13 @@
     }
 
     async function handleToggleReady() {
+      const errEl = document.getElementById('room-error');
+      errEl.textContent = '';
       try {
         await Lobby.toggleReady();
         await refreshRoomPlayers();
-        updateReadyButton();
       } catch (e) {
-        alert(e.message);
-      }
-    }
-
-    async function updateReadyButton() {
-      const btn = document.getElementById('btn-room-ready');
-      if (!btn) return;
-      const players = await Lobby.getRoomPlayers();
-      const user = Auth.getUser();
-      const me = players.find(p => p.user_id === user?.id);
-      if (me && me.is_ready) {
-        btn.textContent = '✓ READY';
-        btn.style.background = 'var(--green)';
-        btn.style.color = '#fff';
-      } else {
-        btn.textContent = 'READY';
-        btn.style.background = '';
-        btn.style.color = '';
+        errEl.textContent = e.message;
       }
     }
 
@@ -448,7 +433,24 @@
       if (Lobby.isHost()) {
         const allReady = players.length >= 1 &&
           players.every(p => p.is_ready && p.team_id);
-        document.getElementById('btn-room-start').disabled = !allReady;
+        const startBtn = document.getElementById('btn-room-start');
+        startBtn.disabled = !allReady;
+
+        // Show hint about what's needed
+        const errEl = document.getElementById('room-error');
+        if (!allReady && errEl && !errEl.textContent) {
+          const notReady = players.filter(p => !p.is_ready);
+          const noTeam = players.filter(p => !p.team_id);
+          if (noTeam.length > 0) {
+            errEl.textContent = `${noTeam.map(p => p.display_name).join(', ')} need to pick a team`;
+            errEl.style.color = 'var(--text-dim)';
+          } else if (notReady.length > 0) {
+            errEl.textContent = `Waiting for ${notReady.map(p => p.display_name).join(', ')} to ready up`;
+            errEl.style.color = 'var(--text-dim)';
+          }
+        } else if (allReady && errEl) {
+          errEl.textContent = '';
+        }
       }
     }
 
