@@ -150,12 +150,13 @@ window.AuctionEngine = (function() {
   function startBidRound() {
     if (!state.isActive) return;
 
-    // First check if anyone is interested at all (for base price)
+    // Check if anyone is interested at all (for base price)
     let anyoneInterested = false;
     TEAMS.forEach(team => {
       const ts = state.teamStates[team.id];
-      if (ts.passed) return;
       if (ts.isHuman) { anyoneInterested = true; return; }
+      if (ts.filled >= 25) return;
+      if (!canAfford(team.id, state.currentBid)) return;
       const eval_ = evaluateBid(team, state.currentPlayer, state.currentBid);
       if (eval_.willBid) anyoneInterested = true;
     });
@@ -262,48 +263,37 @@ window.AuctionEngine = (function() {
     if (!state.isActive) return;
     if (!state.pendingAITimeouts) state.pendingAITimeouts = [];
 
-    // Late re-entry: ~8% chance a passed team jumps back in (change of heart)
-    TEAMS.forEach(team => {
-      const ts = state.teamStates[team.id];
-      if (ts.isHuman || !ts.passed || team.id === state.currentBidder) return;
-      if (ts.filled >= 25 || !canAfford(team.id, state.currentBid + getIncrement(state.currentBid))) return;
-      if (Math.random() < 0.08) {
-        ts.passed = false; // team re-enters the bidding
-        log(`🔄 ${team.shortName} is back in! They've had a change of heart!`, 'dramatic');
-      }
-    });
-
     // Each AI team evaluates and may bid at a random time within the 5s window
+    // Teams that previously passed can re-enter if price is still attractive
     TEAMS.forEach(team => {
       const ts = state.teamStates[team.id];
-      if (ts.isHuman || ts.passed) return;
+      if (ts.isHuman) return;
       if (team.id === state.currentBidder) return; // already leading
+      if (ts.filled >= 25) return;
 
       const nextBid = state.currentBid + getIncrement(state.currentBid);
+      if (!canAfford(team.id, nextBid)) return;
+
       const eval_ = evaluateBid(team, state.currentPlayer, nextBid);
 
-      if (eval_.willBid && nextBid <= eval_.maxBid && canAfford(team.id, nextBid)) {
-        // AI will bid at a random time between 1-4 seconds into the countdown
-        const delay = 1000 + Math.random() * 3000;
+      if (eval_.willBid && nextBid <= eval_.maxBid) {
+        // This team wants to bid — schedule it
+        ts.passed = false; // re-enter if previously passed
+        const delay = 800 + Math.random() * 3500;
         const timeout = setTimeout(() => {
           if (!state.isActive) return;
-          if (team.id === state.currentBidder) return; // became leader already
+          if (team.id === state.currentBidder) return;
 
-          // Re-evaluate with current bid (may have changed)
           const currentNext = state.currentBid + getIncrement(state.currentBid);
           const reeval = evaluateBid(team, state.currentPlayer, currentNext);
           if (reeval.willBid && currentNext <= reeval.maxBid && canAfford(team.id, currentNext)) {
             placeBidInternal(team.id, currentNext, reeval.isBluff);
-            // Reset countdown — new bid came in
             resetCountdown();
-          } else {
-            ts.passed = true;
           }
         }, delay);
         state.pendingAITimeouts.push(timeout);
-      } else {
-        ts.passed = true;
       }
+      // Don't mark as passed here — let them re-evaluate on next countdown reset
     });
   }
 
@@ -408,16 +398,21 @@ window.AuctionEngine = (function() {
     const rc = ts.roleCount;
     const src = ts.subRoleCount;
 
-    // Base role need
+    // Base role need — higher scores so more teams compete for players
     if (role === 'batter') {
-      needScore = rc.batter < needs.batters.min ? 55 : (rc.batter < needs.batters.max ? 28 : 7);
+      needScore = rc.batter < needs.batters.min ? 65 : (rc.batter < needs.batters.max ? 40 : 12);
     } else if (role === 'bowler') {
-      needScore = rc.bowler < needs.bowlers.min ? 55 : (rc.bowler < needs.bowlers.max ? 28 : 7);
+      needScore = rc.bowler < needs.bowlers.min ? 65 : (rc.bowler < needs.bowlers.max ? 40 : 12);
     } else if (role === 'allRounder') {
-      needScore = rc.allRounder < needs.allRounders.min ? 60 : (rc.allRounder < needs.allRounders.max ? 35 : 10);
+      needScore = rc.allRounder < needs.allRounders.min ? 70 : (rc.allRounder < needs.allRounders.max ? 45 : 15);
     } else if (role === 'wicketkeeper') {
-      needScore = rc.wicketkeeper < needs.wicketkeepers.min ? 65 : (rc.wicketkeeper < needs.wicketkeepers.max ? 20 : 3);
+      needScore = rc.wicketkeeper < needs.wicketkeepers.min ? 70 : (rc.wicketkeeper < needs.wicketkeepers.max ? 30 : 5);
     }
+
+    // Star player interest: quality players attract more teams regardless of position need
+    if (player.starPower >= 85) needScore += 20;
+    else if (player.starPower >= 70) needScore += 10;
+    else if (player.starPower >= 55) needScore += 5;
 
     // Sub-role positional need — batting order awareness
     const subRole = player.subRole;
@@ -601,15 +596,21 @@ window.AuctionEngine = (function() {
     const budgetPerSlot = totalSlotsWanted > 0 ? spendableBudget / totalSlotsWanted : spendableBudget;
     const budgetHealthRatio = ts.budget / 12500;
 
-    // CRITICAL: if team hasn't reached 18 yet, be increasingly conservative
+    // Budget discipline: limit per-player spend based on roster progress
     if (slotsFilledPct < 1.0) {
-      // Scale down max bid based on how far from 18 we are
-      // At 0 players: spend max 8% of budget per player
-      // At 10 players: spend max 12% per player
-      // At 16 players: more flexible
-      const maxSpendPct = 0.06 + slotsFilledPct * 0.10; // 6% to 16%
+      // Early auction (0-5 players): can spend up to 15% on stars, 10% on others
+      // Mid auction (6-12): up to 12% on stars, 8% on others
+      // Late (13-17): up to 20% (more desperate)
+      let maxSpendPct;
+      if (ts.filled < 6) {
+        maxSpendPct = needScore >= 50 ? 0.15 : 0.10;
+      } else if (ts.filled < 13) {
+        maxSpendPct = needScore >= 50 ? 0.12 : 0.08;
+      } else {
+        maxSpendPct = 0.20;
+      }
       const pctCap = ts.budget * maxSpendPct;
-      if (maxBid > pctCap && needScore < 60) {
+      if (maxBid > pctCap) {
         maxBid = Math.min(maxBid, pctCap);
       }
     }
@@ -858,26 +859,27 @@ window.AuctionEngine = (function() {
         rounds++;
         let anyBid = false;
 
-        // Each AI team evaluates
+        // Each AI team evaluates — don't permanently pass, re-evaluate each round
         const teamOrder = shuffleArray([...TEAMS]);
         for (const team of teamOrder) {
           const ts = state.teamStates[team.id];
-          if (ts.passed || ts.filled >= 25) continue;
+          if (ts.filled >= 25) continue;
           if (team.id === state.currentBidder) continue;
 
           const nextBid = state.currentBid + getIncrement(state.currentBid);
+          if (!canAfford(team.id, nextBid)) continue;
+
           const eval_ = evaluateBid(team, player, nextBid);
 
-          if (eval_.willBid && nextBid <= eval_.maxBid && canAfford(team.id, nextBid)) {
+          if (eval_.willBid && nextBid <= eval_.maxBid) {
             state.currentBid = nextBid;
             state.currentBidder = team.id;
             state.bidWars[team.id] = (state.bidWars[team.id] || 0) + 1;
             ts.bidCount++;
             anyBid = true;
             break; // one bid per round, then re-evaluate
-          } else {
-            ts.passed = true;
           }
+          // Don't mark as passed — other teams bidding may change this team's interest
         }
 
         if (!anyBid) biddingActive = false;
