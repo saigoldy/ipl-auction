@@ -329,14 +329,14 @@
 
     async function handleToggleReady() {
       const errEl = document.getElementById('room-error');
-      errEl.textContent = '';
-      errEl.style.color = '';
+      if (errEl) { errEl.textContent = ''; errEl.style.color = ''; }
       try {
         await Lobby.toggleReady();
         await refreshRoomPlayers();
       } catch (e) {
-        errEl.textContent = 'Ready error: ' + e.message;
-        errEl.style.color = 'var(--red)';
+        const msg = 'Ready error: ' + e.message;
+        if (errEl) { errEl.textContent = msg; errEl.style.color = 'var(--red)'; }
+        alert(msg);
         console.error('toggleReady failed:', e);
       }
     }
@@ -354,8 +354,8 @@
     async function handleRoomTeamPick(teamId) {
       try {
         await Lobby.pickTeam(teamId);
-        refreshRoomPlayers();
-      } catch (e) { alert(e.message); }
+        await refreshRoomPlayers();
+      } catch (e) { alert('Team pick error: ' + e.message); }
     }
 
     function showRoomScreen(room) {
@@ -570,23 +570,30 @@
 
     // ===== INIT =====
     document.addEventListener('DOMContentLoaded', async () => {
-      const sb = initSupabase();
-      if (sb && SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
-        // Load data from Supabase (falls back to local JS files)
-        await DataLoader.init();
-        const user = await Auth.init();
-        if (user) {
-          Auth.showApp();
-          document.getElementById('btn-play-online').style.display = '';
+      try {
+        const sb = initSupabase();
+        if (sb && SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
+          await DataLoader.init();
+          const user = await Auth.init();
+          if (user) {
+            Auth.showApp();
+            document.getElementById('btn-play-online').style.display = '';
 
-          // Auto-rejoin room if user was in one (handles page refresh)
-          const room = await Lobby.rejoinIfInRoom();
-          if (room) {
-            showRoomScreen(room);
+            // Auto-rejoin room if user was in one (handles page refresh)
+            try {
+              const room = await Lobby.rejoinIfInRoom();
+              if (room) {
+                showRoomScreen(room);
+              }
+            } catch (rejoinErr) {
+              console.error('Room rejoin failed:', rejoinErr);
+            }
           }
+        } else {
+          playOffline();
         }
-      } else {
-        // No Supabase configured — go straight to offline mode
+      } catch (initErr) {
+        console.error('Init failed:', initErr);
         playOffline();
       }
     });
