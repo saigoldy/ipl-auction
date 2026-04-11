@@ -865,7 +865,18 @@ window.App = (function() {
   function handleOnlineEvent(event, payload) {
     switch (event) {
       case 'new_player':
-        if (payload.player) renderAuctionPlayer(payload.player);
+        // Sync local state so UI reads correct values
+        if (payload.player) {
+          AuctionEngine.syncState({
+            currentPlayer: payload.player,
+            currentIndex: payload.currentIndex,
+            phase: payload.phase,
+            currentBid: payload.player.basePrice,
+            currentBidder: null,
+            isActive: true
+          });
+          renderAuctionPlayer(payload.player);
+        }
         if (payload.currentIndex !== undefined) {
           document.getElementById('auction-player-num').textContent = (payload.currentIndex || 0) + 1;
         }
@@ -874,10 +885,18 @@ window.App = (function() {
         }
         break;
       case 'bid_update':
-        if (payload.teamId && payload.amount) onBid(payload.teamId, payload.amount);
+        if (payload.teamId && payload.amount) {
+          // Sync bid state locally
+          AuctionEngine.syncState({ currentBid: payload.amount, currentBidder: payload.teamId });
+          onBid(payload.teamId, payload.amount);
+        }
         break;
       case 'sold':
-        if (payload.player && payload.teamId) onSold(payload.player, payload.teamId, payload.price);
+        if (payload.player && payload.teamId) {
+          // Sync the sold player into local team state
+          AuctionEngine.syncSold(payload.player, payload.teamId, payload.price);
+          onSold(payload.player, payload.teamId, payload.price);
+        }
         break;
       case 'unsold':
         if (payload.player) onUnsold(payload.player);

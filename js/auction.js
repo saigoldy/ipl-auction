@@ -931,6 +931,36 @@ window.AuctionEngine = (function() {
     if (state.callbacks.onAuctionEnd) state.callbacks.onAuctionEnd();
   }
 
+  // Sync a sold player into local state (for non-host online clients)
+  function syncSold(player, teamId, price) {
+    if (!state) return;
+    const ts = state.teamStates[teamId];
+    if (!ts) return;
+    // Avoid duplicates
+    if (ts.squad.some(s => s.player.id === player.id)) return;
+    ts.budget -= price;
+    ts.squad.push({ player, price });
+    ts.filled++;
+    ts.roleCount[player.role] = (ts.roleCount[player.role] || 0) + 1;
+    ts.subRoleCount[player.subRole] = (ts.subRoleCount[player.subRole] || 0) + 1;
+    if (player.isOverseas) {
+      ts.overseasCount++;
+      ts.overseasByRole[player.role] = (ts.overseasByRole[player.role] || 0) + 1;
+    }
+    state.soldPlayers.push({ player, teamId, price });
+  }
+
+  // Sync current bid state (for non-host)
+  function syncState(updates) {
+    if (!state) return;
+    if (updates.currentBid !== undefined) state.currentBid = updates.currentBid;
+    if (updates.currentBidder !== undefined) state.currentBidder = updates.currentBidder;
+    if (updates.currentPlayer !== undefined) state.currentPlayer = updates.currentPlayer;
+    if (updates.currentIndex !== undefined) state.currentIndex = updates.currentIndex;
+    if (updates.phase !== undefined) state.phase = updates.phase;
+    if (updates.isActive !== undefined) state.isActive = updates.isActive;
+  }
+
   function on(event, callback) {
     if (state && state.callbacks.hasOwnProperty('on' + event.charAt(0).toUpperCase() + event.slice(1))) {
       state.callbacks['on' + event.charAt(0).toUpperCase() + event.slice(1)] = callback;
@@ -948,6 +978,8 @@ window.AuctionEngine = (function() {
   return {
     init, getState, nextPlayer, humanBid, humanPass,
     on, getTeamData, getAllTeamStates, formatPrice, getIncrement,
-    canAfford, canBuyPlayer, pause, resume, simulateAll, setOnlineTimer
+    canAfford, canBuyPlayer, pause, resume, simulateAll, setOnlineTimer,
+    // Online sync functions for non-host clients
+    syncSold, syncState
   };
 })();
