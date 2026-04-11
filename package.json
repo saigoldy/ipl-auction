@@ -1,0 +1,8 @@
+{
+  "name": "ipl-auction",
+  "version": "1.0.0",
+  "description": "IPL Auction & Tournament Simulation Game",
+  "scripts": {
+    "build": "node build.js"
+  }
+}
