@@ -506,6 +506,9 @@
       });
       window.onlineMode = true;
 
+      // Longer timer for online (8s vs 5s) to account for network latency
+      AuctionEngine.setOnlineTimer(true);
+
       if (Lobby.isHost()) {
         // HOST: run engine locally + broadcast all events
         App.startAuctionWithTeams(onlineHumanTeams, myTeamId, false);

@@ -145,7 +145,12 @@ window.AuctionEngine = (function() {
 
   let countdownTimer = null;
   let countdownStart = 0;
-  const COUNTDOWN_MS = 5000;
+  // 8 seconds in online mode (network latency), 5 seconds offline
+  let COUNTDOWN_MS = 5000;
+
+  function setOnlineTimer(isOnline) {
+    COUNTDOWN_MS = isOnline ? 8000 : 5000;
+  }
 
   function startBidRound() {
     if (!state.isActive) return;
@@ -264,11 +269,12 @@ window.AuctionEngine = (function() {
     if (!state.pendingAITimeouts) state.pendingAITimeouts = [];
 
     // Each AI team evaluates and may bid at a random time within the 5s window
-    // Teams that previously passed can re-enter if price is still attractive
+    // ONLY AI teams bid here — human teams bid via user input or broadcast
     TEAMS.forEach(team => {
       const ts = state.teamStates[team.id];
+      // CRITICAL: never auto-bid for human-controlled teams
       if (ts.isHuman) return;
-      if (team.id === state.currentBidder) return; // already leading
+      if (team.id === state.currentBidder) return;
       if (ts.filled >= 25) return;
 
       const nextBid = state.currentBid + getIncrement(state.currentBid);
@@ -277,11 +283,11 @@ window.AuctionEngine = (function() {
       const eval_ = evaluateBid(team, state.currentPlayer, nextBid);
 
       if (eval_.willBid && nextBid <= eval_.maxBid) {
-        // This team wants to bid — schedule it
-        ts.passed = false; // re-enter if previously passed
+        ts.passed = false;
         const delay = 800 + Math.random() * 3500;
         const timeout = setTimeout(() => {
           if (!state.isActive) return;
+          if (state.teamStates[team.id].isHuman) return; // double-check: never bid for humans
           if (team.id === state.currentBidder) return;
 
           const currentNext = state.currentBid + getIncrement(state.currentBid);
@@ -293,7 +299,6 @@ window.AuctionEngine = (function() {
         }, delay);
         state.pendingAITimeouts.push(timeout);
       }
-      // Don't mark as passed here — let them re-evaluate on next countdown reset
     });
   }
 
@@ -937,6 +942,6 @@ window.AuctionEngine = (function() {
   return {
     init, getState, nextPlayer, humanBid, humanPass,
     on, getTeamData, getAllTeamStates, formatPrice, getIncrement,
-    canAfford, canBuyPlayer, pause, resume, simulateAll
+    canAfford, canBuyPlayer, pause, resume, simulateAll, setOnlineTimer
   };
 })();
