@@ -351,8 +351,12 @@
     async function handleRoomStart() {
       const errEl = document.getElementById('room-error');
       try {
-        await Lobby.startAuction(); // broadcasts auction_start to others
-        // Host also starts auction locally
+        // Update room status in DB (don't broadcast auction_start yet)
+        const sb = window.supabaseClient;
+        const room = Lobby.getRoom();
+        if (room) await sb.from('rooms').update({ status: 'auction' }).eq('id', room.id);
+
+        // Start auction — this sends auction_start_data THEN auction_start
         await startOnlineAuction();
       } catch (e) {
         if (errEl) { errEl.textContent = 'Start error: ' + e.message; errEl.style.color = 'var(--red)'; }
@@ -482,39 +486,77 @@
     let onlineHumanTeams = {};
 
     // Wire room-phase callbacks (team picks, ready, auction start)
+    let pendingHumanTeams = null;
+
     function wireRoomCallbacks() {
       Lobby.callbacks.onTeamPicked = () => { refreshRoomPlayers(); };
       Lobby.callbacks.onReadyChanged = () => { refreshRoomPlayers(); };
       Lobby.callbacks.onPresenceSync = () => { refreshRoomPlayers(); };
+
+      // Non-host: receive humanTeams data from host BEFORE auction starts
+      Lobby.callbacks.onAuctionStartData = (payload) => {
+        if (payload && payload.humanTeams) {
+          pendingHumanTeams = payload.humanTeams;
+          console.log('Received human teams from host:', JSON.stringify(pendingHumanTeams));
+        }
+      };
+
       // Non-host receives auction_start from host
       Lobby.callbacks.onAuctionStart = () => {
         if (!Lobby.isHost()) {
-          startOnlineAuction(); // non-host starts in client mode
+          // Use the humanTeams that host broadcasted
+          startOnlineAuction(pendingHumanTeams);
+          pendingHumanTeams = null;
         }
       };
     }
 
-    async function startOnlineAuction() {
-      const players = await Lobby.getRoomPlayers();
+    async function startOnlineAuction(broadcastedHumanTeams) {
       const currentUser = Auth.getUser();
-      const myPlayer = players.find(p => p.user_id === currentUser?.id);
-      const myTeamId = myPlayer?.team_id || null;
-
-      onlineHumanTeams = {};
-      players.forEach(p => {
-        if (p.team_id) onlineHumanTeams[p.team_id] = p.display_name;
-      });
       window.onlineMode = true;
-
-      // Longer timer for online (8s vs 5s) to account for network latency
       AuctionEngine.setOnlineTimer(true);
 
       if (Lobby.isHost()) {
-        // HOST: run engine locally + broadcast all events
+        // HOST: build humanTeams from room players — this is the source of truth
+        const players = await Lobby.getRoomPlayers();
+        const myTeamId = players.find(p => p.user_id === currentUser?.id)?.team_id || null;
+
+        onlineHumanTeams = {};
+        players.forEach(p => {
+          if (p.team_id) onlineHumanTeams[p.team_id] = p.display_name;
+        });
+
+        console.log('HOST starting auction. Human teams:', JSON.stringify(onlineHumanTeams));
+
+        // 1. Broadcast humanTeams FIRST so non-hosts have it ready
+        Lobby.broadcastGameState('auction_start_data', { humanTeams: onlineHumanTeams });
+
+        // 2. Small delay then broadcast auction_start so non-hosts process in order
+        setTimeout(() => {
+          Lobby.broadcastGameState('auction_start', {});
+        }, 300);
+
+        // 3. Start engine on host
         App.startAuctionWithTeams(onlineHumanTeams, myTeamId, false);
         wireHostBroadcasts();
       } else {
-        // NON-HOST: set up UI only, DON'T run engine — receive everything from host
+        // NON-HOST: use the host's humanTeams mapping (from broadcast) to avoid mismatch
+        if (broadcastedHumanTeams) {
+          onlineHumanTeams = broadcastedHumanTeams;
+        } else {
+          // Fallback: build from room players
+          const players = await Lobby.getRoomPlayers();
+          onlineHumanTeams = {};
+          players.forEach(p => {
+            if (p.team_id) onlineHumanTeams[p.team_id] = p.display_name;
+          });
+        }
+
+        const players = await Lobby.getRoomPlayers();
+        const myTeamId = players.find(p => p.user_id === currentUser?.id)?.team_id || null;
+
+        console.log('CLIENT starting auction. Human teams:', JSON.stringify(onlineHumanTeams), 'My team:', myTeamId);
+
         App.startAuctionWithTeams(onlineHumanTeams, myTeamId, true);
         wireClientListeners();
       }

@@ -145,22 +145,13 @@ window.Lobby = (function() {
     }
   }
 
-  // Host starts the auction
+  // Host starts the auction (room status update only — broadcast handled by startOnlineAuction)
   async function startAuction() {
     if (!currentRoom) return;
     const sb = window.supabaseClient;
     const user = Auth.getUser();
     if (currentRoom.host_id !== user.id) throw new Error('Only host can start');
-
     await sb.from('rooms').update({ status: 'auction' }).eq('id', currentRoom.id);
-
-    if (realtimeChannel) {
-      realtimeChannel.send({
-        type: 'broadcast',
-        event: 'auction_start',
-        payload: {}
-      });
-    }
   }
 
   // Send a bid through realtime
@@ -228,6 +219,10 @@ window.Lobby = (function() {
 
     realtimeChannel.on('broadcast', { event: 'ready_changed' }, ({ payload }) => {
       if (Lobby.callbacks.onReadyChanged) Lobby.callbacks.onReadyChanged(payload);
+    });
+
+    realtimeChannel.on('broadcast', { event: 'auction_start_data' }, ({ payload }) => {
+      if (Lobby.callbacks.onAuctionStartData) Lobby.callbacks.onAuctionStartData(payload);
     });
 
     realtimeChannel.on('broadcast', { event: 'auction_start' }, () => {
