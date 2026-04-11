@@ -271,6 +271,17 @@ window.AuctionEngine = (function() {
     if (!state.isActive) return;
     if (!state.pendingAITimeouts) state.pendingAITimeouts = [];
 
+    // Late re-entry: ~8% chance a passed team jumps back in (change of heart)
+    TEAMS.forEach(team => {
+      const ts = state.teamStates[team.id];
+      if (ts.isHuman || !ts.passed || team.id === state.currentBidder) return;
+      if (ts.filled >= 25 || !canAfford(team.id, state.currentBid + getIncrement(state.currentBid))) return;
+      if (Math.random() < 0.08) {
+        ts.passed = false; // team re-enters the bidding
+        log(`🔄 ${team.shortName} is back in! They've had a change of heart!`, 'dramatic');
+      }
+    });
+
     // Each AI team evaluates and may bid at a random time within the 5s window
     TEAMS.forEach(team => {
       const ts = state.teamStates[team.id];
@@ -443,11 +454,18 @@ window.AuctionEngine = (function() {
 
     needScore = Math.max(0, needScore);
 
-    // Desperation factor
+    // Desperation factor — stronger scaling to ensure teams reach 18
     const slotsRemaining = state.playerPool.length - state.currentIndex;
     const slotsNeeded = 18 - ts.filled;
-    if (slotsNeeded > 0 && slotsRemaining < slotsNeeded * 3) {
-      needScore += Math.min(40, slotsNeeded * 8);
+    if (slotsNeeded > 0) {
+      if (slotsRemaining < slotsNeeded * 2) {
+        // Critical: fewer players left than twice what we need — must buy almost everyone
+        needScore += Math.min(80, slotsNeeded * 15);
+      } else if (slotsRemaining < slotsNeeded * 3) {
+        needScore += Math.min(50, slotsNeeded * 10);
+      } else if (slotsRemaining < slotsNeeded * 5) {
+        needScore += Math.min(30, slotsNeeded * 5);
+      }
     }
 
     // ===== Step 2: VALUE SCORE (0-80) — Derived composite, no starPower =====
@@ -527,10 +545,41 @@ window.AuctionEngine = (function() {
       rivalryScore = 30 * team.personality.rivalryIntensity;
     }
 
-    // ===== Step 5: COMPUTE MAX BID (with purse awareness) =====
+    // ===== Step 5: COMPUTE MAX BID (with purse awareness + unpredictability) =====
     const rawMax = needScore + valueScore + sentimentScore + rivalryScore;
     let maxBid = player.basePrice * (1 + rawMax / 30);
     maxBid *= (0.7 + team.personality.riskTolerance * 0.6);
+
+    // --- UNPREDICTABILITY FACTORS ---
+
+    // 1. Surprise splurge: ~5% chance a team gets irrationally excited about a player
+    if (Math.random() < 0.05) {
+      const splurgeMultiplier = 1.3 + Math.random() * 0.5; // 1.3x - 1.8x overbid
+      maxBid *= splurgeMultiplier;
+      log(`💡 ${team.shortName} seems VERY keen on ${player.name}!`, '');
+    }
+
+    // 2. Emotional panic buy: team with big need gets desperate even if price is high
+    if (needScore > 55 && ts.filled > 12 && Math.random() < 0.15) {
+      maxBid *= 1.25;
+    }
+
+    // 3. Auction fatigue: later in auction, AI occasionally makes poor decisions
+    const auctionProgress = state.currentIndex / state.playerPool.length;
+    if (auctionProgress > 0.6 && Math.random() < 0.08) {
+      // Random overbid or underbid from fatigue
+      maxBid *= (0.7 + Math.random() * 0.6); // 0.7x to 1.3x
+    }
+
+    // 4. "I won't let you have him" - ego-driven counter-bid
+    if (state.currentBidder && state.bidWars[team.id] >= 2 && Math.random() < 0.12) {
+      maxBid *= 1.2; // stubbornly keeps bidding
+    }
+
+    // 5. Random cold feet: team suddenly loses interest mid-bidding war
+    if (state.bidWars[team.id] >= 3 && Math.random() < 0.1 && needScore < 40) {
+      maxBid *= 0.5; // backs off suddenly
+    }
 
     // Bidding war escalation
     if (state.bidWars[team.id] >= 3) {
@@ -756,6 +805,62 @@ window.AuctionEngine = (function() {
       }
 
       state.currentIndex++;
+    }
+
+    // MANDATORY FILL: ensure every team has at least 18 players
+    // Teams short of 18 must pick unsold players at base price
+    let fillRound = 0;
+    const MAX_FILL_ROUNDS = 5;
+    while (fillRound < MAX_FILL_ROUNDS) {
+      fillRound++;
+      const needyTeams = TEAMS.filter(t => state.teamStates[t.id].filled < 18)
+        .sort((a, b) => state.teamStates[a.id].filled - state.teamStates[b.id].filled); // most needy first
+      if (needyTeams.length === 0) break;
+      if (state.unsoldPlayers.length === 0) break;
+
+      for (const team of needyTeams) {
+        const ts = state.teamStates[team.id];
+        while (ts.filled < 18 && state.unsoldPlayers.length > 0) {
+          // Find best matching unsold player (prioritize role needs, overseas limit)
+          let bestIdx = -1;
+          let bestScore = -1;
+          for (let i = 0; i < state.unsoldPlayers.length; i++) {
+            const p = state.unsoldPlayers[i];
+            const price = Math.max(20, Math.floor(p.basePrice * 0.5)); // half base price for desperation picks
+            if (p.isOverseas && ts.overseasCount >= 8) continue;
+            if (!canAfford(team.id, price)) continue;
+
+            let score = 1;
+            const rc = ts.roleCount;
+            const needs = team.squadNeeds;
+            if (p.role === 'batter' && rc.batter < needs.batters.min) score += 10;
+            if (p.role === 'bowler' && rc.bowler < needs.bowlers.min) score += 10;
+            if (p.role === 'allRounder' && rc.allRounder < needs.allRounders.min) score += 12;
+            if (p.role === 'wicketkeeper' && rc.wicketkeeper < needs.wicketkeepers.min) score += 15;
+            if (!p.isOverseas) score += 3; // prefer Indian players for fill
+
+            if (score > bestScore) {
+              bestScore = score;
+              bestIdx = i;
+            }
+          }
+
+          if (bestIdx === -1) break; // no suitable player found
+
+          const player = state.unsoldPlayers.splice(bestIdx, 1)[0];
+          const price = Math.max(20, Math.floor(player.basePrice * 0.5));
+          ts.budget -= price;
+          ts.squad.push({ player, price });
+          ts.filled++;
+          ts.roleCount[player.role]++;
+          ts.subRoleCount[player.subRole] = (ts.subRoleCount[player.subRole] || 0) + 1;
+          if (player.isOverseas) {
+            ts.overseasCount++;
+            ts.overseasByRole[player.role] = (ts.overseasByRole[player.role] || 0) + 1;
+          }
+          state.soldPlayers.push({ player, teamId: team.id, price });
+        }
+      }
     }
 
     // Restore human team labels for display
