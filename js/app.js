@@ -110,8 +110,9 @@ window.App = (function() {
   }
 
   // Called from both offline (team-select screen) and online (room) modes
-  // myTeamId: in online mode, the team controlled by THIS user (others are remote humans)
-  function startAuctionWithTeams(humanTeams, myTeamId) {
+  // myTeamId: in online mode, the team controlled by THIS user
+  // clientOnly: true for non-host online players (don't run engine, just set up UI)
+  function startAuctionWithTeams(humanTeams, myTeamId, clientOnly) {
     window.myOnlineTeamId = myTeamId || null;
     // Also update teamOwnership for UI consistency
     Object.entries(humanTeams).forEach(([teamId, name]) => {
@@ -138,8 +139,10 @@ window.App = (function() {
     renderSquadTabs();
     showScreen('auction');
 
-    // Start auction
-    setTimeout(() => AuctionEngine.nextPlayer(), 1000);
+    // Start auction — only if this client runs the engine (not for online non-host)
+    if (!clientOnly) {
+      setTimeout(() => AuctionEngine.nextPlayer(), 1000);
+    }
   }
 
   function renderAuctionPlayer(player) {

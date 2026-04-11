@@ -506,16 +506,13 @@
       });
       window.onlineMode = true;
 
-      // Init auction UI — pass this user's team ID so they only see their own controls
-      App.startAuctionWithTeams(onlineHumanTeams, myTeamId);
-
       if (Lobby.isHost()) {
-        // HOST: engine runs locally, broadcast all events
+        // HOST: run engine locally + broadcast all events
+        App.startAuctionWithTeams(onlineHumanTeams, myTeamId, false);
         wireHostBroadcasts();
-        // Engine is already running from startAuctionWithTeams
       } else {
-        // NON-HOST: pause local engine, receive state from host
-        AuctionEngine.pause();
+        // NON-HOST: set up UI only, DON'T run engine — receive everything from host
+        App.startAuctionWithTeams(onlineHumanTeams, myTeamId, true);
         wireClientListeners();
       }
     }
