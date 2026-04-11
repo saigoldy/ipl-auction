@@ -403,6 +403,85 @@ window.SimulationEngine = (function() {
     return { playing11: selected, impactPlayer, overseasInXI };
   }
 
+  // Select the best bowler for the current phase
+  function selectBowlerForOver(bowlerStats, phase, lastBowlerIdx) {
+    // Available: has overs left, not the last bowler (no consecutive)
+    const available = bowlerStats.filter((b, i) => b.overs < 4 && i !== lastBowlerIdx);
+    if (available.length === 0) {
+      // Fallback: allow consecutive if no other option
+      const fallback = bowlerStats.filter(b => b.overs < 4);
+      return fallback.length > 0 ? fallback[0] : null;
+    }
+
+    // Score each bowler for this phase
+    const scored = available.map(b => {
+      const p = b.player;
+      const sub = p.subRole;
+      let score = p.stats.bowling; // base: bowling skill
+
+      // Phase-specific bonuses
+      if (phase === 'powerplay') {
+        if (sub === 'powerplay-bowler') score += 25;
+        if (['RF', 'RFM', 'LF', 'LFM'].includes(p.bowlingStyle)) score += 10; // pace in PP
+        if (sub === 'spin') score -= 10; // spinners usually not in powerplay
+      } else if (phase === 'middle') {
+        if (['OB', 'SLA', 'LB', 'CLA'].includes(p.bowlingStyle)) score += 20; // spinners in middle
+        if (sub === 'spin') score += 15;
+        if (sub === 'bowling-ar') score += 5;
+      } else { // death
+        if (sub === 'death-bowler') score += 30;
+        if (['RF', 'RFM', 'LF', 'LFM'].includes(p.bowlingStyle)) score += 10; // pace at death
+        if (sub === 'spin') score -= 15; // spinners usually not at death
+        if (sub === 'powerplay-bowler') score += 5; // can double at death
+      }
+
+      // Prefer bowlers who haven't bowled much yet (spread overs)
+      if (b.overs === 0) score += 8;
+      if (b.overs >= 3) score -= 10; // save last over for later
+
+      // Small randomness to avoid identical bowling orders every match
+      score += Math.random() * 10;
+
+      return { bowler: b, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0].bowler;
+  }
+
+  // Sort playing 11 into a realistic batting order
+  function sortBattingOrder(players) {
+    // Batting position priority based on subRole and role
+    function getBattingPosition(p) {
+      const sub = p.subRole;
+      const role = p.role;
+
+      // 1-3: Openers and top-order batters/WK-batters
+      if (sub === 'top-order') return 1 + (100 - p.stats.batting) / 100; // best top-order first
+      if (sub === 'wk-batter' && p.stats.batting >= 75) return 2; // WK who can bat well opens/bats 3
+
+      // 3-5: Middle-order batters
+      if (sub === 'middle-order') return 4 + (100 - p.stats.batting) / 100;
+      if (sub === 'wk-batter') return 4.5; // WK with lower batting in middle
+
+      // 5-7: Finishers and batting all-rounders
+      if (sub === 'finisher') return 5.5 + (100 - p.stats.batting) / 100;
+      if (sub === 'batting-ar') return 6 + (100 - p.stats.batting) / 100;
+
+      // 7-8: Bowling all-rounders (can bat a bit)
+      if (sub === 'bowling-ar') return 7.5 + (100 - p.stats.batting) / 100;
+      if (role === 'allRounder') return 7 + (100 - p.stats.batting) / 100;
+
+      // 8-11: Pure bowlers — sorted by batting ability (best batting bowler highest)
+      if (role === 'bowler') return 9 + (100 - p.stats.batting) / 100;
+
+      // Fallback
+      return 8;
+    }
+
+    return players.sort((a, b) => getBattingPosition(a) - getBattingPosition(b));
+  }
+
   // Super Over: 6 balls, pick best batter + best bowler
   function simulateSuperOver(battingTeam, bowlingTeam) {
     const bestBatter = [...battingTeam].sort((a, b) => b.stats.batting - a.stats.batting)[0];
@@ -435,8 +514,8 @@ window.SimulationEngine = (function() {
     let recentWickets = 0; // wickets in last 2 overs
     let recentBoundaries = 0; // boundaries in last 2 overs
 
-    // Init batting order
-    const batters = [...battingTeam];
+    // Init batting order — sorted by realistic position
+    const batters = sortBattingOrder([...battingTeam]);
     const batsmenStats = batters.map(p => ({
       player: p, runs: 0, balls: 0, fours: 0, sixes: 0, howOut: 'not out'
     }));
@@ -451,19 +530,20 @@ window.SimulationEngine = (function() {
     }));
 
     let strikerIdx = 0, nonStrikerIdx = 1;
+    let lastBowlerIdx = -1; // track last bowler to prevent consecutive overs
 
     for (let over = 0; over < 20; over++) {
       if (wickets >= 10) break;
 
-      // Select bowler (can't bowl consecutive, max 4 overs)
-      const availBowlers = bowlerStats.filter(b => b.overs < 4);
-      if (availBowlers.length === 0) break;
-      const bowler = availBowlers[Math.floor(Math.random() * availBowlers.length)];
-
-      let overRuns = 0, overWickets = 0;
-
       // Phase detection
       const phase = over < 6 ? 'powerplay' : over < 15 ? 'middle' : 'death';
+
+      // Select bowler: phase-aware, no consecutive overs, max 4 overs
+      const bowler = selectBowlerForOver(bowlerStats, phase, lastBowlerIdx);
+      if (!bowler) break;
+      lastBowlerIdx = bowlerStats.indexOf(bowler);
+
+      let overRuns = 0, overWickets = 0;
 
       for (let ball = 0; ball < 6; ball++) {
         if (wickets >= 10) break;
