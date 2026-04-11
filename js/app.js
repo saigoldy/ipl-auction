@@ -793,9 +793,24 @@ window.App = (function() {
     }
   }
 
+  function simulateAuction() {
+    if (!confirm('This will simulate the entire remaining auction instantly (all AI). Continue?')) return;
+
+    // Hide bid controls and disable simulate button
+    document.getElementById('bid-controls').classList.add('hidden');
+    document.getElementById('btn-simulate').disabled = true;
+    document.getElementById('btn-simulate').textContent = 'Simulating...';
+
+    // Run the simulation
+    setTimeout(() => {
+      AuctionEngine.simulateAll();
+      // UI will be updated by the onAuctionEnd callback
+    }, 100);
+  }
+
   return {
     showScreen, renamePlayer, startAuction, startAuctionWithTeams, placeBid, passBid,
-    placeBidFor, passBidFor, togglePause,
+    placeBidFor, passBidFor, togglePause, simulateAuction,
     viewSquad, showReviewTeam, startTournament,
     simNext, simFive, simAll
   };

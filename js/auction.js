@@ -527,7 +527,7 @@ window.AuctionEngine = (function() {
       rivalryScore = 30 * team.personality.rivalryIntensity;
     }
 
-    // ===== Step 5: COMPUTE MAX BID =====
+    // ===== Step 5: COMPUTE MAX BID (with purse awareness) =====
     const rawMax = needScore + valueScore + sentimentScore + rivalryScore;
     let maxBid = player.basePrice * (1 + rawMax / 30);
     maxBid *= (0.7 + team.personality.riskTolerance * 0.6);
@@ -546,9 +546,48 @@ window.AuctionEngine = (function() {
       maxBid *= 1.3;
     }
 
-    // Cap at affordable
+    // ===== PURSE AWARENESS =====
     const slotsNeededAfter = Math.max(0, 18 - ts.filled - 1);
-    const maxAffordable = ts.budget - (slotsNeededAfter * 20);
+    const totalSlotsWanted = Math.max(0, 22 - ts.filled - 1); // aim for 22, not just min 18
+
+    // Reserve budget: minimum 20L/slot for mandatory, 40L/slot average target
+    const hardReserve = slotsNeededAfter * 20;
+    const softReserve = totalSlotsWanted * 40;
+    const maxAffordable = ts.budget - hardReserve;
+
+    // Budget pacing: scale maxBid based on how much budget is left vs slots needed
+    const budgetPerSlot = totalSlotsWanted > 0 ? (ts.budget - hardReserve) / totalSlotsWanted : ts.budget;
+    const budgetHealthRatio = ts.budget / 12500; // 1.0 = full purse, 0.0 = empty
+
+    // Reduce bids when budget is tight
+    if (budgetHealthRatio < 0.5 && slotsNeededAfter > 3) {
+      // Below 50% budget with many slots to fill — be conservative
+      maxBid *= (0.6 + budgetHealthRatio * 0.8); // scales from 0.6x to 1.0x
+    } else if (budgetHealthRatio < 0.3 && slotsNeededAfter > 0) {
+      // Very low budget — only bid on essentials
+      maxBid *= 0.5;
+    }
+
+    // Don't overspend relative to average-per-slot budget
+    if (totalSlotsWanted > 0 && maxBid > budgetPerSlot * 2.5 && needScore < 50) {
+      // Non-essential player costing >2.5x avg slot budget — pull back
+      maxBid = Math.min(maxBid, budgetPerSlot * 2.0);
+    }
+
+    // Phase-aware budget: save more during marquee phase for later bargains
+    if (state.phase === 'MARQUEE' && ts.filled < 5) {
+      const marqueeSpendCap = ts.budget * 0.15; // don't spend >15% of purse on one marquee player
+      if (needScore < 40 && maxBid > marqueeSpendCap) {
+        maxBid = Math.min(maxBid, marqueeSpendCap);
+      }
+    }
+
+    // When budget is flush and few slots filled, allow splurges on high-need players
+    if (budgetHealthRatio > 0.7 && needScore > 60 && ts.filled < 10) {
+      maxBid *= 1.15;
+    }
+
+    // Cap at what's actually affordable (hard limit)
     maxBid = Math.min(maxBid, maxAffordable);
     maxBid = Math.floor(maxBid);
 
@@ -615,7 +654,119 @@ window.AuctionEngine = (function() {
     if (state.callbacks.onLog) state.callbacks.onLog(msg, type || '');
   }
 
-  // Old timer functions removed — countdown system is defined above in the bidding flow
+  // ===== SIMULATE ENTIRE AUCTION (instant, all AI) =====
+  function simulateAll() {
+    if (!state) return;
+    // Clear any running timers
+    clearCountdown();
+    if (state.pendingAITimeouts) {
+      state.pendingAITimeouts.forEach(t => clearTimeout(t));
+      state.pendingAITimeouts = [];
+    }
+
+    // Make all teams AI for simulation
+    Object.keys(state.humanTeams).forEach(id => {
+      state.teamStates[id].isHuman = false;
+    });
+    const savedHumanTeams = { ...state.humanTeams };
+    state.humanTeams = {};
+
+    // Run through all players instantly
+    while (state.currentIndex < state.playerPool.length || (state.round === 1 && state.unsoldPlayers.length > 0)) {
+      // Set up next player
+      if (state.currentIndex >= state.playerPool.length) {
+        if (state.round === 1 && state.unsoldPlayers.length > 0) {
+          state.round = 2;
+          state.phase = 'ROUND 2';
+          state.playerPool = shuffleArray(state.unsoldPlayers).map(p => {
+            return { ...p, basePrice: Math.max(20, Math.floor(p.basePrice * 0.75)) };
+          });
+          state.unsoldPlayers = [];
+          state.currentIndex = 0;
+        } else {
+          break;
+        }
+      }
+
+      const player = state.playerPool[state.currentIndex];
+      state.currentPlayer = player;
+      state.currentBid = player.basePrice;
+      state.currentBidder = null;
+      state.bidHistory = [];
+      state.bidWars = {};
+      state.isActive = true;
+
+      // Reset team bid states
+      TEAMS.forEach(t => {
+        state.teamStates[t.id].bidCount = 0;
+        state.teamStates[t.id].passed = false;
+      });
+
+      // Simulate bidding rounds for this player
+      let biddingActive = true;
+      let rounds = 0;
+      const MAX_ROUNDS = 50; // safety limit
+
+      while (biddingActive && rounds < MAX_ROUNDS) {
+        rounds++;
+        let anyBid = false;
+
+        // Each AI team evaluates
+        const teamOrder = shuffleArray([...TEAMS]);
+        for (const team of teamOrder) {
+          const ts = state.teamStates[team.id];
+          if (ts.passed || ts.filled >= 25) continue;
+          if (team.id === state.currentBidder) continue;
+
+          const nextBid = state.currentBid + getIncrement(state.currentBid);
+          const eval_ = evaluateBid(team, player, nextBid);
+
+          if (eval_.willBid && nextBid <= eval_.maxBid && canAfford(team.id, nextBid)) {
+            state.currentBid = nextBid;
+            state.currentBidder = team.id;
+            state.bidWars[team.id] = (state.bidWars[team.id] || 0) + 1;
+            ts.bidCount++;
+            anyBid = true;
+            break; // one bid per round, then re-evaluate
+          } else {
+            ts.passed = true;
+          }
+        }
+
+        if (!anyBid) biddingActive = false;
+      }
+
+      // Resolve: sold or unsold
+      if (state.currentBidder) {
+        const teamId = state.currentBidder;
+        const price = state.currentBid;
+        const ts = state.teamStates[teamId];
+        ts.budget -= price;
+        ts.squad.push({ player, price });
+        ts.filled++;
+        ts.roleCount[player.role]++;
+        ts.subRoleCount[player.subRole] = (ts.subRoleCount[player.subRole] || 0) + 1;
+        if (player.isOverseas) {
+          ts.overseasCount++;
+          ts.overseasByRole[player.role] = (ts.overseasByRole[player.role] || 0) + 1;
+        }
+        state.soldPlayers.push({ player, teamId, price });
+      } else {
+        state.unsoldPlayers.push(player);
+      }
+
+      state.currentIndex++;
+    }
+
+    // Restore human team labels for display
+    state.humanTeams = savedHumanTeams;
+    Object.keys(savedHumanTeams).forEach(id => {
+      state.teamStates[id].isHuman = true;
+    });
+
+    state.isActive = false;
+    if (state.callbacks.onAuctionEnd) state.callbacks.onAuctionEnd();
+  }
 
   function on(event, callback) {
     if (state && state.callbacks.hasOwnProperty('on' + event.charAt(0).toUpperCase() + event.slice(1))) {
@@ -634,6 +785,6 @@ window.AuctionEngine = (function() {
   return {
     init, getState, nextPlayer, humanBid, humanPass,
     on, getTeamData, getAllTeamStates, formatPrice, getIncrement,
-    canAfford, canBuyPlayer, pause, resume
+    canAfford, canBuyPlayer, pause, resume, simulateAll
   };
 })();
