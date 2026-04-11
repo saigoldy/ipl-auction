@@ -110,7 +110,9 @@ window.App = (function() {
   }
 
   // Called from both offline (team-select screen) and online (room) modes
-  function startAuctionWithTeams(humanTeams) {
+  // myTeamId: in online mode, the team controlled by THIS user (others are remote humans)
+  function startAuctionWithTeams(humanTeams, myTeamId) {
+    window.myOnlineTeamId = myTeamId || null;
     // Also update teamOwnership for UI consistency
     Object.entries(humanTeams).forEach(([teamId, name]) => {
       teamOwnership[teamId] = { type: 'human', playerNum: Object.keys(teamOwnership).filter(k => teamOwnership[k].type === 'human').length + 1, name };
@@ -256,8 +258,15 @@ window.App = (function() {
     const controls = document.getElementById('bid-controls');
     controls.classList.remove('hidden');
 
-    // Build buttons for each human team
-    const humanIds = Object.keys(teamOwnership).filter(id => teamOwnership[id].type === 'human');
+    // Build buttons for human teams — in online mode, only show THIS user's team
+    let humanIds = Object.keys(teamOwnership).filter(id => teamOwnership[id].type === 'human');
+    if (window.onlineMode && window.myOnlineTeamId) {
+      humanIds = humanIds.filter(id => id === window.myOnlineTeamId);
+    }
+    if (humanIds.length === 0) {
+      controls.classList.add('hidden');
+      return;
+    }
     const nextBid = state.currentBid + AuctionEngine.getIncrement(state.currentBid);
 
     // Show which team(s) can bid

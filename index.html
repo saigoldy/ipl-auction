@@ -496,14 +496,18 @@
 
     async function startOnlineAuction() {
       const players = await Lobby.getRoomPlayers();
+      const currentUser = Auth.getUser();
+      const myPlayer = players.find(p => p.user_id === currentUser?.id);
+      const myTeamId = myPlayer?.team_id || null;
+
       onlineHumanTeams = {};
       players.forEach(p => {
         if (p.team_id) onlineHumanTeams[p.team_id] = p.display_name;
       });
       window.onlineMode = true;
 
-      // Init auction UI for everyone
-      App.startAuctionWithTeams(onlineHumanTeams);
+      // Init auction UI — pass this user's team ID so they only see their own controls
+      App.startAuctionWithTeams(onlineHumanTeams, myTeamId);
 
       if (Lobby.isHost()) {
         // HOST: engine runs locally, broadcast all events
