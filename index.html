@@ -327,8 +327,30 @@
     }
 
     async function handleToggleReady() {
-      await Lobby.toggleReady();
-      refreshRoomPlayers();
+      try {
+        await Lobby.toggleReady();
+        await refreshRoomPlayers();
+        updateReadyButton();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function updateReadyButton() {
+      const btn = document.getElementById('btn-room-ready');
+      if (!btn) return;
+      const players = await Lobby.getRoomPlayers();
+      const user = Auth.getUser();
+      const me = players.find(p => p.user_id === user?.id);
+      if (me && me.is_ready) {
+        btn.textContent = '✓ READY';
+        btn.style.background = 'var(--green)';
+        btn.style.color = '#fff';
+      } else {
+        btn.textContent = 'READY';
+        btn.style.background = '';
+        btn.style.color = '';
+      }
     }
 
     async function handleRoomStart() {
@@ -354,9 +376,9 @@
       refreshRoomPlayers();
 
       // Wire realtime callbacks
-      Lobby.callbacks.onTeamPicked = () => refreshRoomPlayers();
-      Lobby.callbacks.onReadyChanged = () => refreshRoomPlayers();
-      Lobby.callbacks.onPresenceSync = () => refreshRoomPlayers();
+      Lobby.callbacks.onTeamPicked = () => { refreshRoomPlayers(); };
+      Lobby.callbacks.onReadyChanged = () => { refreshRoomPlayers(); };
+      Lobby.callbacks.onPresenceSync = () => { refreshRoomPlayers(); };
       Lobby.callbacks.onAuctionStart = () => {
         // Start the auction with room players' team assignments
         startOnlineAuction();
@@ -406,9 +428,26 @@
           </div>`;
         }).join('');
 
-      // Enable start button if all ready (host only)
+      // Update ready button visual state
+      const user = Auth.getUser();
+      const me = players.find(p => p.user_id === user?.id);
+      const readyBtn = document.getElementById('btn-room-ready');
+      if (readyBtn && me) {
+        if (me.is_ready) {
+          readyBtn.textContent = '✓ READY';
+          readyBtn.style.background = 'var(--green)';
+          readyBtn.style.color = '#fff';
+        } else {
+          readyBtn.textContent = 'READY';
+          readyBtn.style.background = '';
+          readyBtn.style.color = '';
+        }
+      }
+
+      // Enable start button if all players have picked teams and are ready
       if (Lobby.isHost()) {
-        const allReady = players.length >= 1 && players.every(p => p.is_ready || p.user_id === Auth.getUser().id);
+        const allReady = players.length >= 1 &&
+          players.every(p => p.is_ready && p.team_id);
         document.getElementById('btn-room-start').disabled = !allReady;
       }
     }

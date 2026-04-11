@@ -103,14 +103,34 @@ window.Lobby = (function() {
 
   // Toggle ready status
   async function toggleReady() {
-    if (!currentRoom) return;
+    if (!currentRoom) { console.error('No room'); return; }
     const sb = window.supabaseClient;
     const user = Auth.getUser();
+    if (!user) { console.error('No user'); return; }
 
-    const { data } = await sb.from('room_players').select('is_ready').eq('room_id', currentRoom.id).eq('user_id', user.id).single();
-    const newReady = !data?.is_ready;
+    // Check if player has picked a team first
+    const { data: playerData, error: fetchErr } = await sb.from('room_players')
+      .select('is_ready, team_id')
+      .eq('room_id', currentRoom.id)
+      .eq('user_id', user.id)
+      .single();
 
-    await sb.from('room_players').update({ is_ready: newReady }).eq('room_id', currentRoom.id).eq('user_id', user.id);
+    if (fetchErr) { console.error('Failed to fetch ready state:', fetchErr); return; }
+    if (!playerData) { console.error('Player not found in room'); return; }
+
+    // Must pick a team before readying up
+    if (!playerData.team_id && !playerData.is_ready) {
+      throw new Error('Pick a team first before readying up!');
+    }
+
+    const newReady = !playerData.is_ready;
+
+    const { error: updateErr } = await sb.from('room_players')
+      .update({ is_ready: newReady })
+      .eq('room_id', currentRoom.id)
+      .eq('user_id', user.id);
+
+    if (updateErr) { console.error('Failed to update ready:', updateErr); return; }
 
     if (realtimeChannel) {
       realtimeChannel.send({
