@@ -294,10 +294,39 @@ window.Lobby = (function() {
   function getRoom() { return currentRoom; }
   function isHost() { return currentRoom && currentRoom.host_id === Auth.getUser()?.id; }
 
+  // Auto-rejoin room if user was in one (handles page refresh)
+  async function rejoinIfInRoom() {
+    const sb = window.supabaseClient;
+    const user = Auth.getUser();
+    if (!user || currentRoom) return null;
+
+    // Check if user is in any active room
+    const { data: myRoomPlayer } = await sb.from('room_players')
+      .select('room_id')
+      .eq('user_id', user.id)
+      .limit(1)
+      .single();
+
+    if (!myRoomPlayer) return null;
+
+    // Get the room
+    const { data: room } = await sb.from('rooms')
+      .select('*')
+      .eq('id', myRoomPlayer.room_id)
+      .in('status', ['waiting', 'picking_teams'])
+      .single();
+
+    if (!room) return null;
+
+    currentRoom = room;
+    subscribeToRoom(room.id);
+    return room;
+  }
+
   return {
     createRoom, joinRoom, leaveRoom, pickTeam, toggleReady, startAuction,
     sendBid, sendPass, sendPause, broadcastGameState,
-    getRoomPlayers, getActiveRooms, getRoom, isHost,
+    getRoomPlayers, getActiveRooms, getRoom, isHost, rejoinIfInRoom,
     callbacks: {}
   };
 })();

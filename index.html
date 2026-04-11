@@ -498,6 +498,12 @@
         if (user) {
           Auth.showApp();
           document.getElementById('btn-play-online').style.display = '';
+
+          // Auto-rejoin room if user was in one (handles page refresh)
+          const room = await Lobby.rejoinIfInRoom();
+          if (room) {
+            showRoomScreen(room);
+          }
         }
       } else {
         // No Supabase configured — go straight to offline mode
