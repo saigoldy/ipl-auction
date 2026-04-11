@@ -272,6 +272,14 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onAuctionEnd) Lobby.callbacks.onAuctionEnd(payload);
     });
 
+    realtimeChannel.on('broadcast', { event: 'log' }, ({ payload }) => {
+      if (Lobby.callbacks.onLog) Lobby.callbacks.onLog(payload);
+    });
+
+    realtimeChannel.on('broadcast', { event: 'human_turn' }, ({ payload }) => {
+      if (Lobby.callbacks.onHumanTurn) Lobby.callbacks.onHumanTurn(payload);
+    });
+
     realtimeChannel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         await realtimeChannel.track({ user_id: Auth.getUser().id, online_at: new Date().toISOString() });

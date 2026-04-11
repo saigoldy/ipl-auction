@@ -351,10 +351,12 @@
     async function handleRoomStart() {
       const errEl = document.getElementById('room-error');
       try {
-        await Lobby.startAuction();
+        await Lobby.startAuction(); // broadcasts auction_start to others
+        // Host also starts auction locally
+        await startOnlineAuction();
       } catch (e) {
-        errEl.textContent = 'Start error: ' + e.message;
-        errEl.style.color = 'var(--red)';
+        if (errEl) { errEl.textContent = 'Start error: ' + e.message; errEl.style.color = 'var(--red)'; }
+        alert('Start error: ' + e.message);
       }
     }
 
@@ -381,14 +383,8 @@
       renderRoomTeamGrid();
       refreshRoomPlayers();
 
-      // Wire realtime callbacks
-      Lobby.callbacks.onTeamPicked = () => { refreshRoomPlayers(); };
-      Lobby.callbacks.onReadyChanged = () => { refreshRoomPlayers(); };
-      Lobby.callbacks.onPresenceSync = () => { refreshRoomPlayers(); };
-      Lobby.callbacks.onAuctionStart = () => {
-        // Start the auction with room players' team assignments
-        startOnlineAuction();
-      };
+      // Wire realtime callbacks for room phase
+      wireRoomCallbacks();
     }
 
     function renderRoomTeamGrid() {
@@ -481,9 +477,22 @@
       }
     }
 
-    // Track if we're in online mode and whether we're the host
+    // ===== ONLINE MULTIPLAYER =====
     window.onlineMode = false;
     let onlineHumanTeams = {};
+
+    // Wire room-phase callbacks (team picks, ready, auction start)
+    function wireRoomCallbacks() {
+      Lobby.callbacks.onTeamPicked = () => { refreshRoomPlayers(); };
+      Lobby.callbacks.onReadyChanged = () => { refreshRoomPlayers(); };
+      Lobby.callbacks.onPresenceSync = () => { refreshRoomPlayers(); };
+      // Non-host receives auction_start from host
+      Lobby.callbacks.onAuctionStart = () => {
+        if (!Lobby.isHost()) {
+          startOnlineAuction(); // non-host starts in client mode
+        }
+      };
+    }
 
     async function startOnlineAuction() {
       const players = await Lobby.getRoomPlayers();
@@ -493,26 +502,29 @@
       });
       window.onlineMode = true;
 
+      // Init auction UI for everyone
+      App.startAuctionWithTeams(onlineHumanTeams);
+
       if (Lobby.isHost()) {
-        // HOST: run the auction engine and broadcast all events to other players
-        App.startAuctionWithTeams(onlineHumanTeams);
+        // HOST: engine runs locally, broadcast all events
         wireHostBroadcasts();
+        // Engine is already running from startAuctionWithTeams
       } else {
-        // NON-HOST: init UI but don't run engine - listen for host broadcasts
-        App.startAuctionWithTeams(onlineHumanTeams);
-        AuctionEngine.pause(); // host controls the engine
+        // NON-HOST: pause local engine, receive state from host
+        AuctionEngine.pause();
         wireClientListeners();
       }
     }
 
     function wireHostBroadcasts() {
-      // After startAuctionWithTeams sets up callbacks, wrap them to also broadcast
       const st = AuctionEngine.getState();
       const orig = { ...st.callbacks };
 
       AuctionEngine.on('newPlayer', (player) => {
         if (orig.onNewPlayer) orig.onNewPlayer(player);
-        Lobby.broadcastGameState('new_player', { player, currentIndex: st.currentIndex, phase: st.phase });
+        Lobby.broadcastGameState('new_player', {
+          player, currentIndex: st.currentIndex, phase: st.phase
+        });
       });
       AuctionEngine.on('bid', (teamId, amount) => {
         if (orig.onBid) orig.onBid(teamId, amount);
@@ -530,9 +542,19 @@
         if (orig.onTimerUpdate) orig.onTimerUpdate(remaining);
         Lobby.broadcastGameState('timer_update', { remaining });
       });
+      AuctionEngine.on('log', (msg, type) => {
+        if (orig.onLog) orig.onLog(msg, type);
+        Lobby.broadcastGameState('log', { msg, type });
+      });
+      AuctionEngine.on('humanTurn', (humanTeamIds) => {
+        if (orig.onHumanTurn) orig.onHumanTurn(humanTeamIds);
+        Lobby.broadcastGameState('human_turn', { humanTeamIds });
+      });
       AuctionEngine.on('auctionEnd', () => {
         if (orig.onAuctionEnd) orig.onAuctionEnd();
-        Lobby.broadcastGameState('auction_end', { teamStates: AuctionEngine.getAllTeamStates() });
+        Lobby.broadcastGameState('auction_end', {
+          teamStates: AuctionEngine.getAllTeamStates()
+        });
       });
 
       // Receive remote bids/passes from non-host players
@@ -549,13 +571,17 @@
     }
 
     function wireClientListeners() {
-      // Non-host listens for all game state events from host
+      // Non-host receives all game events from host
       Lobby.callbacks.onNewPlayer = (payload) => App.handleOnlineEvent('new_player', payload);
       Lobby.callbacks.onBidUpdate = (payload) => App.handleOnlineEvent('bid_update', payload);
       Lobby.callbacks.onSold = (payload) => App.handleOnlineEvent('sold', payload);
       Lobby.callbacks.onUnsold = (payload) => App.handleOnlineEvent('unsold', payload);
       Lobby.callbacks.onTimerUpdate = (payload) => App.handleOnlineEvent('timer_update', payload);
       Lobby.callbacks.onAuctionEnd = (payload) => App.handleOnlineEvent('auction_end', payload);
+
+      // Also listen for log and humanTurn
+      Lobby.callbacks.onLog = (payload) => App.handleOnlineEvent('log', payload);
+      Lobby.callbacks.onHumanTurn = (payload) => App.handleOnlineEvent('human_turn', payload);
     }
 
     async function loadActiveRooms() {

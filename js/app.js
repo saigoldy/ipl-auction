@@ -801,14 +801,16 @@ window.App = (function() {
     }
   }
 
-  // Handle online broadcast events from other players
+  // Handle online broadcast events from host (non-host players)
   function handleOnlineEvent(event, payload) {
     switch (event) {
       case 'new_player':
         if (payload.player) renderAuctionPlayer(payload.player);
-        if (payload.state) {
-          document.getElementById('auction-player-num').textContent = (payload.state.currentIndex || 0) + 1;
-          document.getElementById('auction-phase').textContent = payload.state.phase || '';
+        if (payload.currentIndex !== undefined) {
+          document.getElementById('auction-player-num').textContent = (payload.currentIndex || 0) + 1;
+        }
+        if (payload.phase) {
+          document.getElementById('auction-phase').textContent = payload.phase;
         }
         break;
       case 'bid_update':
@@ -825,6 +827,9 @@ window.App = (function() {
         break;
       case 'log':
         if (payload.msg) addAuctionLog(payload.msg, payload.type || '');
+        break;
+      case 'human_turn':
+        if (payload.humanTeamIds) onHumanTurn(payload.humanTeamIds);
         break;
       case 'auction_end':
         onAuctionEnd();
