@@ -2,20 +2,9 @@
 window.AuctionEngine = (function() {
   let state = null;
 
-  const BID_INCREMENTS = [
-    { threshold: 0, increment: 20 },
-    { threshold: 200, increment: 25 },
-    { threshold: 500, increment: 50 },
-    { threshold: 1000, increment: 75 },
-    { threshold: 1500, increment: 100 }
-  ];
-
+  // Fixed bid increment: 0.25 Cr (25 Lakhs) at all levels
   function getIncrement(currentBid) {
-    let inc = 20;
-    for (const tier of BID_INCREMENTS) {
-      if (currentBid >= tier.threshold) inc = tier.increment;
-    }
-    return inc;
+    return 25;
   }
 
   function formatPrice(lakhs) {
