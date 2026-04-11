@@ -330,16 +330,25 @@
     async function handleToggleReady() {
       const errEl = document.getElementById('room-error');
       errEl.textContent = '';
+      errEl.style.color = '';
       try {
         await Lobby.toggleReady();
         await refreshRoomPlayers();
       } catch (e) {
-        errEl.textContent = e.message;
+        errEl.textContent = 'Ready error: ' + e.message;
+        errEl.style.color = 'var(--red)';
+        console.error('toggleReady failed:', e);
       }
     }
 
     async function handleRoomStart() {
-      await Lobby.startAuction();
+      const errEl = document.getElementById('room-error');
+      try {
+        await Lobby.startAuction();
+      } catch (e) {
+        errEl.textContent = 'Start error: ' + e.message;
+        errEl.style.color = 'var(--red)';
+      }
     }
 
     async function handleRoomTeamPick(teamId) {
@@ -354,8 +363,13 @@
       document.getElementById('room-title').textContent = room.name || 'IPL Auction Room';
       document.getElementById('room-code-value').textContent = room.code;
 
-      // Show start button only for host
-      document.getElementById('btn-room-start').style.display = Lobby.isHost() ? '' : 'none';
+      // Show start button for host
+      const isHost = Lobby.isHost();
+      document.getElementById('btn-room-start').style.display = isHost ? '' : 'none';
+
+      // Clear any previous errors
+      const errEl = document.getElementById('room-error');
+      if (errEl) { errEl.textContent = ''; errEl.style.color = ''; }
 
       renderRoomTeamGrid();
       refreshRoomPlayers();

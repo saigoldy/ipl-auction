@@ -103,24 +103,28 @@ window.Lobby = (function() {
 
   // Toggle ready status
   async function toggleReady() {
-    if (!currentRoom) { console.error('No room'); return; }
     const sb = window.supabaseClient;
     const user = Auth.getUser();
-    if (!user) { console.error('No user'); return; }
+    if (!user) throw new Error('Not logged in');
 
-    // Check if player has picked a team first
+    // If currentRoom lost (page refresh), try to recover it
+    if (!currentRoom) {
+      const recovered = await rejoinIfInRoom();
+      if (!recovered) throw new Error('Not in a room. Please rejoin.');
+    }
+
+    // Fetch current state
     const { data: playerData, error: fetchErr } = await sb.from('room_players')
       .select('is_ready, team_id')
       .eq('room_id', currentRoom.id)
       .eq('user_id', user.id)
       .single();
 
-    if (fetchErr) { console.error('Failed to fetch ready state:', fetchErr); return; }
-    if (!playerData) { console.error('Player not found in room'); return; }
+    if (fetchErr) throw new Error('Failed to fetch your status: ' + fetchErr.message);
+    if (!playerData) throw new Error('You are not in this room');
 
-    // Must pick a team before readying up
     if (!playerData.team_id && !playerData.is_ready) {
-      throw new Error('Pick a team first before readying up!');
+      throw new Error('Pick a team first!');
     }
 
     const newReady = !playerData.is_ready;
@@ -130,7 +134,7 @@ window.Lobby = (function() {
       .eq('room_id', currentRoom.id)
       .eq('user_id', user.id);
 
-    if (updateErr) { console.error('Failed to update ready:', updateErr); return; }
+    if (updateErr) throw new Error('Failed to update ready: ' + updateErr.message);
 
     if (realtimeChannel) {
       realtimeChannel.send({
@@ -298,29 +302,37 @@ window.Lobby = (function() {
   async function rejoinIfInRoom() {
     const sb = window.supabaseClient;
     const user = Auth.getUser();
-    if (!user || currentRoom) return null;
+    if (!user) return null;
+    if (currentRoom) return currentRoom; // already in a room
 
-    // Check if user is in any active room
-    const { data: myRoomPlayer } = await sb.from('room_players')
-      .select('room_id')
-      .eq('user_id', user.id)
-      .limit(1)
-      .single();
+    try {
+      // Check if user is in any room_players entry
+      const { data: myEntries, error: e1 } = await sb.from('room_players')
+        .select('room_id')
+        .eq('user_id', user.id);
 
-    if (!myRoomPlayer) return null;
+      if (e1 || !myEntries || myEntries.length === 0) return null;
 
-    // Get the room
-    const { data: room } = await sb.from('rooms')
-      .select('*')
-      .eq('id', myRoomPlayer.room_id)
-      .in('status', ['waiting', 'picking_teams'])
-      .single();
+      // Try each room to find an active one
+      for (const entry of myEntries) {
+        const { data: room, error: e2 } = await sb.from('rooms')
+          .select('*')
+          .eq('id', entry.room_id)
+          .in('status', ['waiting', 'picking_teams'])
+          .single();
 
-    if (!room) return null;
+        if (room && !e2) {
+          currentRoom = room;
+          subscribeToRoom(room.id);
+          console.log('Auto-rejoined room:', room.code);
+          return room;
+        }
+      }
+    } catch (err) {
+      console.error('rejoinIfInRoom error:', err);
+    }
 
-    currentRoom = room;
-    subscribeToRoom(room.id);
-    return room;
+    return null;
   }
 
   return {
