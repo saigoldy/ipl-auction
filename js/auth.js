@@ -13,9 +13,20 @@ window.Auth = (function() {
       await ensureProfile(currentUser);
     }
 
+    // Track the original user ID for this tab
+    const tabUserId = currentUser ? currentUser.id : null;
+
     // Listen for auth changes
     sb.auth.onAuthStateChange(async (event, session) => {
       if (session) {
+        // Detect if a DIFFERENT user logged in (another tab)
+        if (tabUserId && session.user.id !== tabUserId) {
+          // Another account logged in from another tab — don't switch this tab
+          console.warn('Different account detected in another tab. Reload to switch.');
+          const banner = document.getElementById('session-conflict-banner');
+          if (banner) banner.style.display = 'block';
+          return; // Don't update this tab's user
+        }
         currentUser = session.user;
         await ensureProfile(currentUser);
         showApp();

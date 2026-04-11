@@ -10,6 +10,12 @@
 </head>
 <body>
 
+  <!-- Session conflict warning -->
+  <div id="session-conflict-banner" style="display:none;position:fixed;top:0;left:0;right:0;background:#ff5722;color:white;padding:12px;text-align:center;z-index:9999;font-size:14px">
+    Another account was logged in from another tab. This tab's session may be stale.
+    <button onclick="location.reload()" style="margin-left:12px;padding:4px 16px;background:white;color:#ff5722;border:none;border-radius:4px;cursor:pointer;font-weight:bold">Reload Page</button>
+  </div>
+
   <!-- User bar (shown when logged in) -->
   <div id="user-bar" class="user-bar" style="display:none"></div>
 
