@@ -550,27 +550,42 @@
       const st = AuctionEngine.getState();
       const orig = { ...st.callbacks };
 
+      // Helper: get current state snapshot for every broadcast
+      function snap() {
+        return {
+          idx: st.currentIndex,
+          phase: st.phase,
+          total: st.playerPool ? st.playerPool.length : 0
+        };
+      }
+
       AuctionEngine.on('newPlayer', (player) => {
         if (orig.onNewPlayer) orig.onNewPlayer(player);
         Lobby.broadcastGameState('new_player', {
-          player, currentIndex: st.currentIndex, phase: st.phase
+          player, currentIndex: st.currentIndex, phase: st.phase,
+          total: st.playerPool ? st.playerPool.length : 0
         });
       });
       AuctionEngine.on('bid', (teamId, amount) => {
         if (orig.onBid) orig.onBid(teamId, amount);
-        Lobby.broadcastGameState('bid_update', { teamId, amount });
+        Lobby.broadcastGameState('bid_update', { teamId, amount, ...snap() });
       });
       AuctionEngine.on('sold', (player, teamId, price) => {
         if (orig.onSold) orig.onSold(player, teamId, price);
-        Lobby.broadcastGameState('sold', { player, teamId, price });
+        Lobby.broadcastGameState('sold', { player, teamId, price, ...snap() });
       });
       AuctionEngine.on('unsold', (player) => {
         if (orig.onUnsold) orig.onUnsold(player);
-        Lobby.broadcastGameState('unsold', { player });
+        Lobby.broadcastGameState('unsold', { player, ...snap() });
       });
       AuctionEngine.on('timerUpdate', (remaining) => {
         if (orig.onTimerUpdate) orig.onTimerUpdate(remaining);
-        Lobby.broadcastGameState('timer_update', { remaining });
+        // Don't broadcast every timer tick — too much traffic
+        // Only broadcast every 500ms worth of updates
+        if (!wireHostBroadcasts._lastTimer || Date.now() - wireHostBroadcasts._lastTimer > 500) {
+          wireHostBroadcasts._lastTimer = Date.now();
+          Lobby.broadcastGameState('timer_update', { remaining });
+        }
       });
       AuctionEngine.on('log', (msg, type) => {
         if (orig.onLog) orig.onLog(msg, type);
@@ -578,7 +593,7 @@
       });
       AuctionEngine.on('humanTurn', (humanTeamIds) => {
         if (orig.onHumanTurn) orig.onHumanTurn(humanTeamIds);
-        Lobby.broadcastGameState('human_turn', { humanTeamIds });
+        Lobby.broadcastGameState('human_turn', { humanTeamIds, ...snap() });
       });
       AuctionEngine.on('auctionEnd', () => {
         if (orig.onAuctionEnd) orig.onAuctionEnd();

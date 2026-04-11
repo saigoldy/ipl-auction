@@ -861,12 +861,29 @@ window.App = (function() {
     }
   }
 
+  // Track last received index to ignore stale/duplicate events
+  let lastReceivedIdx = -1;
+
   // Handle online broadcast events from host (non-host players)
   function handleOnlineEvent(event, payload) {
+    // Update progress display from any event that has index info
+    if (payload && payload.idx !== undefined) {
+      document.getElementById('auction-player-num').textContent = (payload.idx || 0) + 1;
+    }
+    if (payload && payload.total) {
+      document.getElementById('auction-total-players').textContent = payload.total;
+    }
+    if (payload && payload.phase) {
+      document.getElementById('auction-phase').textContent = payload.phase;
+    }
+
     switch (event) {
       case 'new_player':
-        // Sync local state so UI reads correct values
         if (payload.player) {
+          // Skip if we've already seen a newer player
+          if (payload.currentIndex !== undefined && payload.currentIndex < lastReceivedIdx) break;
+          lastReceivedIdx = payload.currentIndex || 0;
+
           AuctionEngine.syncState({
             currentPlayer: payload.player,
             currentIndex: payload.currentIndex,
@@ -876,24 +893,17 @@ window.App = (function() {
             isActive: true
           });
           renderAuctionPlayer(payload.player);
-        }
-        if (payload.currentIndex !== undefined) {
           document.getElementById('auction-player-num').textContent = (payload.currentIndex || 0) + 1;
-        }
-        if (payload.phase) {
-          document.getElementById('auction-phase').textContent = payload.phase;
         }
         break;
       case 'bid_update':
         if (payload.teamId && payload.amount) {
-          // Sync bid state locally
           AuctionEngine.syncState({ currentBid: payload.amount, currentBidder: payload.teamId });
           onBid(payload.teamId, payload.amount);
         }
         break;
       case 'sold':
         if (payload.player && payload.teamId) {
-          // Sync the sold player into local team state
           AuctionEngine.syncSold(payload.player, payload.teamId, payload.price);
           onSold(payload.player, payload.teamId, payload.price);
         }

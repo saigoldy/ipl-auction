@@ -714,8 +714,9 @@ window.AuctionEngine = (function() {
     if (state.callbacks.onSold) state.callbacks.onSold(player, teamId, price);
 
     state.currentIndex++;
-    // Delay before next player
-    setTimeout(() => nextPlayer(), 2500);
+    // Longer delay in online mode for broadcast sync
+    const soldDelay = COUNTDOWN_MS >= 8000 ? 3500 : 2500;
+    setTimeout(() => nextPlayer(), soldDelay);
   }
 
   function markUnsold() {
@@ -728,7 +729,9 @@ window.AuctionEngine = (function() {
     if (state.callbacks.onUnsold) state.callbacks.onUnsold(player);
 
     state.currentIndex++;
-    setTimeout(() => nextPlayer(), 1800);
+    // Longer delay in online mode for broadcast sync
+    const unsoldDelay = COUNTDOWN_MS >= 8000 ? 3000 : 1800;
+    setTimeout(() => nextPlayer(), unsoldDelay);
   }
 
   function log(msg, type) {
