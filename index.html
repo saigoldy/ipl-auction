@@ -5,11 +5,104 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>IPL Mega Auction & Simulation</title>
   <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
 
+  <!-- User bar (shown when logged in) -->
+  <div id="user-bar" class="user-bar" style="display:none"></div>
+
+  <!-- ===== AUTH SCREEN ===== -->
+  <section id="screen-auth" class="screen active">
+    <div class="auth-container">
+      <div class="ipl-logo">🏏</div>
+      <h1 class="title-glow">IPL MEGA AUCTION</h1>
+      <p class="subtitle">Login to play online</p>
+
+      <div class="auth-card" id="auth-card">
+        <!-- Login Form -->
+        <div id="login-form">
+          <h3>Sign In</h3>
+          <input type="email" id="login-email" class="auth-input" placeholder="Email">
+          <input type="password" id="login-password" class="auth-input" placeholder="Password">
+          <div id="login-error" class="auth-error"></div>
+          <button class="btn btn-primary auth-btn" onclick="handleLogin()">Sign In</button>
+          <button class="btn btn-secondary auth-btn" onclick="handleGoogleLogin()" style="margin-top:8px">
+            Sign in with Google
+          </button>
+          <p class="auth-toggle">Don't have an account? <a href="#" onclick="toggleAuthForm('register')">Register</a></p>
+        </div>
+
+        <!-- Register Form -->
+        <div id="register-form" style="display:none">
+          <h3>Create Account</h3>
+          <input type="text" id="reg-name" class="auth-input" placeholder="Display Name">
+          <input type="email" id="reg-email" class="auth-input" placeholder="Email">
+          <input type="password" id="reg-password" class="auth-input" placeholder="Password (min 6 chars)">
+          <div id="reg-error" class="auth-error"></div>
+          <button class="btn btn-primary auth-btn" onclick="handleRegister()">Create Account</button>
+          <p class="auth-toggle">Already have an account? <a href="#" onclick="toggleAuthForm('login')">Sign In</a></p>
+        </div>
+      </div>
+
+      <p style="color:var(--text-dim);font-size:12px;margin-top:20px">Or play offline without an account:</p>
+      <button class="btn btn-secondary" onclick="playOffline()">Play Offline</button>
+    </div>
+  </section>
+
+  <!-- ===== LOBBY SCREEN ===== -->
+  <section id="screen-lobby" class="screen">
+    <div class="lobby-container">
+      <h2>Online Lobby</h2>
+      <div class="lobby-actions">
+        <div class="lobby-card">
+          <h3>Create Room</h3>
+          <input type="text" id="room-name-input" class="auth-input" placeholder="Room Name (optional)">
+          <button class="btn btn-primary" onclick="handleCreateRoom()">Create Room</button>
+        </div>
+        <div class="lobby-card">
+          <h3>Join Room</h3>
+          <input type="text" id="room-code-input" class="auth-input" placeholder="Enter Room Code" maxlength="6" style="text-transform:uppercase;text-align:center;font-size:24px;letter-spacing:6px">
+          <button class="btn btn-primary" onclick="handleJoinRoom()">Join Room</button>
+        </div>
+      </div>
+      <div id="lobby-error" class="auth-error"></div>
+
+      <h3 style="margin-top:30px">Active Rooms</h3>
+      <div id="active-rooms" class="active-rooms">
+        <p style="color:var(--text-dim)">Loading...</p>
+      </div>
+
+      <div style="margin-top:20px;text-align:center">
+        <button class="btn btn-secondary" onclick="App.showScreen('home')">Back to Home</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== ROOM SCREEN ===== -->
+  <section id="screen-room" class="screen">
+    <div class="room-container">
+      <div class="room-header">
+        <h2 id="room-title">Room</h2>
+        <div class="room-code-display">Code: <span id="room-code-value" class="room-code-big">------</span></div>
+      </div>
+      <p class="room-hint">Share this code with friends to join!</p>
+
+      <h3>Players & Teams</h3>
+      <div id="room-team-grid" class="team-grid"></div>
+
+      <div class="room-players-list" id="room-players-list"></div>
+
+      <div class="room-bottom-actions">
+        <button class="btn btn-primary btn-large" id="btn-room-start" onclick="handleRoomStart()" style="display:none">Start Auction</button>
+        <button class="btn btn-secondary" id="btn-room-ready" onclick="handleToggleReady()">Ready</button>
+        <button class="btn btn-secondary" onclick="handleLeaveRoom()" style="background:#333">Leave Room</button>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== HOME SCREEN ===== -->
-  <section id="screen-home" class="screen active">
+  <section id="screen-home" class="screen">
     <div class="home-container">
       <div class="ipl-logo">🏏</div>
       <h1 class="title-glow">IPL MEGA AUCTION</h1>
@@ -19,7 +112,10 @@
         <div class="info-card"><span class="info-num">₹125 Cr</span><span class="info-label">Per Team</span></div>
         <div class="info-card"><span class="info-num">200+</span><span class="info-label">Players</span></div>
       </div>
-      <button class="btn btn-primary btn-large" onclick="App.showScreen('team-select')">Start Auction</button>
+      <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary btn-large" id="btn-play-online" onclick="App.showScreen('lobby')" style="display:none">Play Online</button>
+        <button class="btn btn-secondary btn-large" onclick="App.showScreen('team-select')">Play Offline</button>
+      </div>
     </div>
   </section>
 
@@ -148,10 +244,221 @@
     <button class="btn btn-primary btn-large" onclick="location.reload()">Play Again</button>
   </section>
 
+  <script src="js/supabase-config.js"></script>
   <script src="data/teams.js"></script>
   <script src="data/players.js"></script>
   <script src="js/auction.js"></script>
   <script src="js/simulation.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/lobby.js"></script>
   <script src="js/app.js"></script>
+  <script>
+    // ===== AUTH HANDLERS =====
+    function toggleAuthForm(form) {
+      document.getElementById('login-form').style.display = form === 'login' ? 'block' : 'none';
+      document.getElementById('register-form').style.display = form === 'register' ? 'block' : 'none';
+      document.getElementById('login-error').textContent = '';
+      document.getElementById('reg-error').textContent = '';
+    }
+
+    async function handleLogin() {
+      const email = document.getElementById('login-email').value;
+      const password = document.getElementById('login-password').value;
+      const errEl = document.getElementById('login-error');
+      errEl.textContent = '';
+      try {
+        await Auth.signIn(email, password);
+      } catch (e) { errEl.textContent = e.message; }
+    }
+
+    async function handleRegister() {
+      const name = document.getElementById('reg-name').value;
+      const email = document.getElementById('reg-email').value;
+      const password = document.getElementById('reg-password').value;
+      const errEl = document.getElementById('reg-error');
+      errEl.textContent = '';
+      if (!name) { errEl.textContent = 'Enter a display name'; return; }
+      if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; return; }
+      try {
+        await Auth.signUp(email, password, name);
+        errEl.style.color = 'var(--green)';
+        errEl.textContent = 'Account created! Check your email to verify, then sign in.';
+      } catch (e) { errEl.textContent = e.message; }
+    }
+
+    async function handleGoogleLogin() {
+      try { await Auth.signInWithGoogle(); }
+      catch (e) { document.getElementById('login-error').textContent = e.message; }
+    }
+
+    function playOffline() {
+      document.getElementById('screen-auth').style.display = 'none';
+      App.showScreen('home');
+    }
+
+    // ===== LOBBY HANDLERS =====
+    async function handleCreateRoom() {
+      const name = document.getElementById('room-name-input').value;
+      const errEl = document.getElementById('lobby-error');
+      errEl.textContent = '';
+      try {
+        const room = await Lobby.createRoom(name);
+        showRoomScreen(room);
+      } catch (e) { errEl.textContent = e.message; }
+    }
+
+    async function handleJoinRoom() {
+      const code = document.getElementById('room-code-input').value.toUpperCase();
+      const errEl = document.getElementById('lobby-error');
+      errEl.textContent = '';
+      if (!code || code.length < 4) { errEl.textContent = 'Enter a valid room code'; return; }
+      try {
+        const room = await Lobby.joinRoom(code);
+        showRoomScreen(room);
+      } catch (e) { errEl.textContent = e.message; }
+    }
+
+    async function handleLeaveRoom() {
+      await Lobby.leaveRoom();
+      App.showScreen('lobby');
+      loadActiveRooms();
+    }
+
+    async function handleToggleReady() {
+      await Lobby.toggleReady();
+      refreshRoomPlayers();
+    }
+
+    async function handleRoomStart() {
+      await Lobby.startAuction();
+    }
+
+    async function handleRoomTeamPick(teamId) {
+      try {
+        await Lobby.pickTeam(teamId);
+        refreshRoomPlayers();
+      } catch (e) { alert(e.message); }
+    }
+
+    function showRoomScreen(room) {
+      App.showScreen('room');
+      document.getElementById('room-title').textContent = room.name || 'IPL Auction Room';
+      document.getElementById('room-code-value').textContent = room.code;
+
+      // Show start button only for host
+      document.getElementById('btn-room-start').style.display = Lobby.isHost() ? '' : 'none';
+
+      renderRoomTeamGrid();
+      refreshRoomPlayers();
+
+      // Wire realtime callbacks
+      Lobby.callbacks.onTeamPicked = () => refreshRoomPlayers();
+      Lobby.callbacks.onReadyChanged = () => refreshRoomPlayers();
+      Lobby.callbacks.onPresenceSync = () => refreshRoomPlayers();
+      Lobby.callbacks.onAuctionStart = () => {
+        // Start the auction with room players' team assignments
+        startOnlineAuction();
+      };
+    }
+
+    function renderRoomTeamGrid() {
+      const grid = document.getElementById('room-team-grid');
+      grid.innerHTML = TEAMS.map(team => `
+        <div class="team-select-card" onclick="handleRoomTeamPick('${team.id}')" style="cursor:pointer">
+          <div class="team-emoji">${team.emoji}</div>
+          <div class="team-name" style="color:${team.colors.primary}">${team.shortName}</div>
+          <div class="team-city">${team.city}</div>
+          <div class="owner-badge" id="room-team-owner-${team.id}" style="background:#333;color:#aaa">🤖 AI</div>
+        </div>
+      `).join('');
+    }
+
+    async function refreshRoomPlayers() {
+      const players = await Lobby.getRoomPlayers();
+      // Update team badges
+      TEAMS.forEach(t => {
+        const badge = document.getElementById('room-team-owner-' + t.id);
+        if (!badge) return;
+        const owner = players.find(p => p.team_id === t.id);
+        if (owner) {
+          badge.style.background = t.colors.primary;
+          badge.style.color = '#fff';
+          badge.textContent = '🎮 ' + owner.display_name;
+        } else {
+          badge.style.background = '#333';
+          badge.style.color = '#aaa';
+          badge.textContent = '🤖 AI';
+        }
+      });
+
+      // Player list
+      const list = document.getElementById('room-players-list');
+      list.innerHTML = '<h4 style="margin:12px 0 8px">Players in Room:</h4>' +
+        players.map(p => {
+          const team = TEAMS.find(t => t.id === p.team_id);
+          return `<div class="human-chip" style="border-color:${team ? team.colors.primary : '#444'}">
+            <span>${team ? team.emoji : '❓'}</span>
+            <span>${p.display_name}</span>
+            <span style="color:${p.is_ready ? 'var(--green)' : 'var(--red)'}">${p.is_ready ? '✓ Ready' : '...'}</span>
+            ${p.user_id === Lobby.getRoom()?.host_id ? '<span style="color:var(--gold)">👑</span>' : ''}
+          </div>`;
+        }).join('');
+
+      // Enable start button if all ready (host only)
+      if (Lobby.isHost()) {
+        const allReady = players.length >= 1 && players.every(p => p.is_ready || p.user_id === Auth.getUser().id);
+        document.getElementById('btn-room-start').disabled = !allReady;
+      }
+    }
+
+    async function startOnlineAuction() {
+      const players = await Lobby.getRoomPlayers();
+      const humanTeams = {};
+      players.forEach(p => {
+        if (p.team_id) humanTeams[p.team_id] = p.display_name;
+      });
+      // Use existing App.startAuction flow but with online human teams
+      // For now, start the offline auction with the room's team picks
+      App.startAuctionWithTeams(humanTeams);
+    }
+
+    async function loadActiveRooms() {
+      const rooms = await Lobby.getActiveRooms();
+      const container = document.getElementById('active-rooms');
+      if (!rooms || rooms.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-dim)">No active rooms. Create one!</p>';
+        return;
+      }
+      container.innerHTML = rooms.map(r => {
+        const playerCount = r.room_players?.[0]?.count || 0;
+        return `<div class="room-list-item" onclick="handleJoinRoom_code('${r.code}')">
+          <span class="room-list-name">${r.name}</span>
+          <span class="room-list-code">${r.code}</span>
+          <span class="room-list-players">${playerCount}/${r.max_players} players</span>
+          <span class="room-list-status">${r.status}</span>
+        </div>`;
+      }).join('');
+    }
+
+    function handleJoinRoom_code(code) {
+      document.getElementById('room-code-input').value = code;
+      handleJoinRoom();
+    }
+
+    // ===== INIT =====
+    document.addEventListener('DOMContentLoaded', async () => {
+      const sb = initSupabase();
+      if (sb && SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
+        const user = await Auth.init();
+        if (user) {
+          Auth.showApp();
+          document.getElementById('btn-play-online').style.display = '';
+        }
+      } else {
+        // No Supabase configured — go straight to offline mode
+        playOffline();
+      }
+    });
+  </script>
 </body>
 </html>

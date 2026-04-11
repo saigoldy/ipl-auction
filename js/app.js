@@ -15,6 +15,12 @@ window.App = (function() {
     currentScreen = id;
 
     if (id === 'team-select') renderTeamSelect();
+    if (id === 'lobby' && typeof loadActiveRooms === 'function') loadActiveRooms();
+    if (id === 'home') {
+      // Show "Play Online" only if logged in
+      const onlineBtn = document.getElementById('btn-play-online');
+      if (onlineBtn) onlineBtn.style.display = Auth.getUser() ? '' : 'none';
+    }
   }
 
   // ===== TEAM SELECTION =====
@@ -99,6 +105,15 @@ window.App = (function() {
     const humanTeams = {};
     Object.entries(teamOwnership).forEach(([teamId, o]) => {
       if (o.type === 'human') humanTeams[teamId] = o.name;
+    });
+    startAuctionWithTeams(humanTeams);
+  }
+
+  // Called from both offline (team-select screen) and online (room) modes
+  function startAuctionWithTeams(humanTeams) {
+    // Also update teamOwnership for UI consistency
+    Object.entries(humanTeams).forEach(([teamId, name]) => {
+      teamOwnership[teamId] = { type: 'human', playerNum: Object.keys(teamOwnership).filter(k => teamOwnership[k].type === 'human').length + 1, name };
     });
 
     AuctionEngine.init(humanTeams);
@@ -779,7 +794,7 @@ window.App = (function() {
   }
 
   return {
-    showScreen, renamePlayer, startAuction, placeBid, passBid,
+    showScreen, renamePlayer, startAuction, startAuctionWithTeams, placeBid, passBid,
     placeBidFor, passBidFor, togglePause,
     viewSquad, showReviewTeam, startTournament,
     simNext, simFive, simAll
