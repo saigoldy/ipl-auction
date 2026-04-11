@@ -106,6 +106,8 @@ window.AuctionEngine = (function() {
         state.currentIndex = 0;
         log('📢 ROUND 2 BEGINS! Unsold players return at reduced base prices!', 'dramatic');
       } else {
+        // Before ending, ensure all teams have minimum 18 players
+        mandatoryFillSquads();
         state.isActive = false;
         if (state.callbacks.onAuctionEnd) state.callbacks.onAuctionEnd();
         return null;
@@ -389,8 +391,9 @@ window.AuctionEngine = (function() {
 
   function canAfford(teamId, bidAmount) {
     const ts = state.teamStates[teamId];
-    const slotsNeeded = 18 - ts.filled - 1; // -1 for current player
-    const reserveNeeded = Math.max(0, slotsNeeded) * 20; // 20L minimum per remaining slot
+    const slotsNeeded = Math.max(0, 18 - ts.filled - 1); // -1 for current player
+    // Reserve 30L per remaining mandatory slot (enough for budget players)
+    const reserveNeeded = slotsNeeded * 30;
     return ts.budget - bidAmount >= reserveNeeded;
   }
 
@@ -595,37 +598,48 @@ window.AuctionEngine = (function() {
       maxBid *= 1.3;
     }
 
-    // ===== PURSE AWARENESS =====
-    const slotsNeededAfter = Math.max(0, 18 - ts.filled - 1);
-    const totalSlotsWanted = Math.max(0, 22 - ts.filled - 1); // aim for 22, not just min 18
+    // ===== PURSE AWARENESS (18-player minimum aware) =====
+    const mandatorySlotsLeft = Math.max(0, 18 - ts.filled - 1); // slots still needed for min 18
+    const totalSlotsWanted = Math.max(0, 22 - ts.filled - 1); // aim for 22
+    const slotsFilledPct = ts.filled / 18; // 0 to 1+ (1 = minimum reached)
 
-    // Reserve budget: minimum 20L/slot for mandatory, 40L/slot average target
-    const hardReserve = slotsNeededAfter * 20;
-    const softReserve = totalSlotsWanted * 40;
+    // Hard reserve: must keep enough for remaining mandatory slots (30L each)
+    const hardReserve = mandatorySlotsLeft * 30;
     const maxAffordable = ts.budget - hardReserve;
 
-    // Budget pacing: scale maxBid based on how much budget is left vs slots needed
-    const budgetPerSlot = totalSlotsWanted > 0 ? (ts.budget - hardReserve) / totalSlotsWanted : ts.budget;
-    const budgetHealthRatio = ts.budget / 12500; // 1.0 = full purse, 0.0 = empty
+    // Budget pacing
+    const spendableBudget = Math.max(0, ts.budget - hardReserve);
+    const budgetPerSlot = totalSlotsWanted > 0 ? spendableBudget / totalSlotsWanted : spendableBudget;
+    const budgetHealthRatio = ts.budget / 12500;
+
+    // CRITICAL: if team hasn't reached 18 yet, be increasingly conservative
+    if (slotsFilledPct < 1.0) {
+      // Scale down max bid based on how far from 18 we are
+      // At 0 players: spend max 8% of budget per player
+      // At 10 players: spend max 12% per player
+      // At 16 players: more flexible
+      const maxSpendPct = 0.06 + slotsFilledPct * 0.10; // 6% to 16%
+      const pctCap = ts.budget * maxSpendPct;
+      if (maxBid > pctCap && needScore < 60) {
+        maxBid = Math.min(maxBid, pctCap);
+      }
+    }
 
     // Reduce bids when budget is tight
-    if (budgetHealthRatio < 0.5 && slotsNeededAfter > 3) {
-      // Below 50% budget with many slots to fill — be conservative
-      maxBid *= (0.6 + budgetHealthRatio * 0.8); // scales from 0.6x to 1.0x
-    } else if (budgetHealthRatio < 0.3 && slotsNeededAfter > 0) {
-      // Very low budget — only bid on essentials
-      maxBid *= 0.5;
+    if (budgetHealthRatio < 0.5 && mandatorySlotsLeft > 3) {
+      maxBid *= (0.5 + budgetHealthRatio * 0.8);
+    } else if (budgetHealthRatio < 0.3 && mandatorySlotsLeft > 0) {
+      maxBid *= 0.4;
     }
 
     // Don't overspend relative to average-per-slot budget
-    if (totalSlotsWanted > 0 && maxBid > budgetPerSlot * 2.5 && needScore < 50) {
-      // Non-essential player costing >2.5x avg slot budget — pull back
-      maxBid = Math.min(maxBid, budgetPerSlot * 2.0);
+    if (totalSlotsWanted > 0 && maxBid > budgetPerSlot * 2.0 && needScore < 50) {
+      maxBid = Math.min(maxBid, budgetPerSlot * 1.8);
     }
 
-    // Phase-aware budget: save more during marquee phase for later bargains
+    // Phase-aware: in early auction, limit per-player spend to save for depth
     if (state.phase === 'MARQUEE' && ts.filled < 5) {
-      const marqueeSpendCap = ts.budget * 0.15; // don't spend >15% of purse on one marquee player
+      const marqueeSpendCap = ts.budget * 0.12;
       if (needScore < 40 && maxBid > marqueeSpendCap) {
         maxBid = Math.min(maxBid, marqueeSpendCap);
       }
@@ -638,7 +652,7 @@ window.AuctionEngine = (function() {
 
     // Cap at what's actually affordable (hard limit)
     maxBid = Math.min(maxBid, maxAffordable);
-    maxBid = Math.floor(maxBid);
+    maxBid = Math.max(0, Math.floor(maxBid));
 
     // ===== Step 6: BLUFF CHECK =====
     let isBluff = false;
@@ -701,6 +715,101 @@ window.AuctionEngine = (function() {
 
   function log(msg, type) {
     if (state.callbacks.onLog) state.callbacks.onLog(msg, type || '');
+  }
+
+  // ===== MANDATORY SQUAD FILL =====
+  // Ensures every team reaches minimum 18 players by assigning unsold players
+  function mandatoryFillSquads() {
+    if (!state) return;
+
+    // First, generate placeholder players if unsold pool is empty but teams still need players
+    let fillAttempts = 0;
+    const MAX_ATTEMPTS = 10;
+
+    while (fillAttempts < MAX_ATTEMPTS) {
+      fillAttempts++;
+      const needyTeams = TEAMS.filter(t => state.teamStates[t.id].filled < 18)
+        .sort((a, b) => state.teamStates[a.id].filled - state.teamStates[b.id].filled);
+
+      if (needyTeams.length === 0) break;
+
+      // If no unsold players left, pull from ALL players not yet in any squad
+      if (state.unsoldPlayers.length === 0) {
+        const allSquadPlayerIds = new Set();
+        TEAMS.forEach(t => {
+          state.teamStates[t.id].squad.forEach(s => allSquadPlayerIds.add(s.player.id));
+        });
+        const unassigned = PLAYERS.filter(p => !allSquadPlayerIds.has(p.id));
+        if (unassigned.length > 0) {
+          state.unsoldPlayers.push(...unassigned);
+        } else {
+          break; // truly no players left anywhere
+        }
+      }
+
+      let anyFilled = false;
+      for (const team of needyTeams) {
+        const ts = state.teamStates[team.id];
+        if (ts.filled >= 18) continue;
+
+        // Find best matching unsold player
+        let bestIdx = -1;
+        let bestScore = -1;
+        for (let i = 0; i < state.unsoldPlayers.length; i++) {
+          const p = state.unsoldPlayers[i];
+          // Skip overseas if at limit
+          if (p.isOverseas && ts.overseasCount >= 8) continue;
+
+          let score = 1;
+          const rc = ts.roleCount;
+          const needs = team.squadNeeds;
+          if (p.role === 'batter' && rc.batter < needs.batters.min) score += 10;
+          if (p.role === 'bowler' && rc.bowler < needs.bowlers.min) score += 10;
+          if (p.role === 'allRounder' && rc.allRounder < needs.allRounders.min) score += 12;
+          if (p.role === 'wicketkeeper' && rc.wicketkeeper < needs.wicketkeepers.min) score += 15;
+          if (!p.isOverseas) score += 3;
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestIdx = i;
+          }
+        }
+
+        if (bestIdx === -1) {
+          // If only overseas remain and we're at 8, allow going over overseas limit as last resort
+          for (let i = 0; i < state.unsoldPlayers.length; i++) {
+            bestIdx = i;
+            break;
+          }
+        }
+
+        if (bestIdx === -1) break;
+
+        const player = state.unsoldPlayers.splice(bestIdx, 1)[0];
+        const price = Math.min(20, ts.budget); // minimum possible price, don't exceed budget
+        ts.budget -= price;
+        ts.squad.push({ player, price });
+        ts.filled++;
+        ts.roleCount[player.role]++;
+        ts.subRoleCount[player.subRole] = (ts.subRoleCount[player.subRole] || 0) + 1;
+        if (player.isOverseas) {
+          ts.overseasCount++;
+          ts.overseasByRole[player.role] = (ts.overseasByRole[player.role] || 0) + 1;
+        }
+        state.soldPlayers.push({ player, teamId: team.id, price });
+        anyFilled = true;
+      }
+
+      if (!anyFilled) break;
+    }
+
+    // Log any teams that still couldn't reach 18 (shouldn't happen with 235+ players)
+    TEAMS.forEach(t => {
+      const ts = state.teamStates[t.id];
+      if (ts.filled < 18) {
+        log(`⚠️ ${t.shortName} could only fill ${ts.filled}/18 slots!`, 'dramatic');
+      }
+    });
   }
 
   // ===== SIMULATE ENTIRE AUCTION (instant, all AI) =====
@@ -807,61 +916,8 @@ window.AuctionEngine = (function() {
       state.currentIndex++;
     }
 
-    // MANDATORY FILL: ensure every team has at least 18 players
-    // Teams short of 18 must pick unsold players at base price
-    let fillRound = 0;
-    const MAX_FILL_ROUNDS = 5;
-    while (fillRound < MAX_FILL_ROUNDS) {
-      fillRound++;
-      const needyTeams = TEAMS.filter(t => state.teamStates[t.id].filled < 18)
-        .sort((a, b) => state.teamStates[a.id].filled - state.teamStates[b.id].filled); // most needy first
-      if (needyTeams.length === 0) break;
-      if (state.unsoldPlayers.length === 0) break;
-
-      for (const team of needyTeams) {
-        const ts = state.teamStates[team.id];
-        while (ts.filled < 18 && state.unsoldPlayers.length > 0) {
-          // Find best matching unsold player (prioritize role needs, overseas limit)
-          let bestIdx = -1;
-          let bestScore = -1;
-          for (let i = 0; i < state.unsoldPlayers.length; i++) {
-            const p = state.unsoldPlayers[i];
-            const price = Math.max(20, Math.floor(p.basePrice * 0.5)); // half base price for desperation picks
-            if (p.isOverseas && ts.overseasCount >= 8) continue;
-            if (!canAfford(team.id, price)) continue;
-
-            let score = 1;
-            const rc = ts.roleCount;
-            const needs = team.squadNeeds;
-            if (p.role === 'batter' && rc.batter < needs.batters.min) score += 10;
-            if (p.role === 'bowler' && rc.bowler < needs.bowlers.min) score += 10;
-            if (p.role === 'allRounder' && rc.allRounder < needs.allRounders.min) score += 12;
-            if (p.role === 'wicketkeeper' && rc.wicketkeeper < needs.wicketkeepers.min) score += 15;
-            if (!p.isOverseas) score += 3; // prefer Indian players for fill
-
-            if (score > bestScore) {
-              bestScore = score;
-              bestIdx = i;
-            }
-          }
-
-          if (bestIdx === -1) break; // no suitable player found
-
-          const player = state.unsoldPlayers.splice(bestIdx, 1)[0];
-          const price = Math.max(20, Math.floor(player.basePrice * 0.5));
-          ts.budget -= price;
-          ts.squad.push({ player, price });
-          ts.filled++;
-          ts.roleCount[player.role]++;
-          ts.subRoleCount[player.subRole] = (ts.subRoleCount[player.subRole] || 0) + 1;
-          if (player.isOverseas) {
-            ts.overseasCount++;
-            ts.overseasByRole[player.role] = (ts.overseasByRole[player.role] || 0) + 1;
-          }
-          state.soldPlayers.push({ player, teamId: team.id, price });
-        }
-      }
-    }
+    // Ensure all teams have minimum 18 players
+    mandatoryFillSquads();
 
     // Restore human team labels for display
     state.humanTeams = savedHumanTeams;
