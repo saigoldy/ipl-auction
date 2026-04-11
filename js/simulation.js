@@ -126,8 +126,10 @@ window.SimulationEngine = (function() {
 
   function simulateMatch(teamAId, teamBId, venue, isPlayoff) {
     const weather = WEATHER_OPTIONS[Math.floor(Math.random() * WEATHER_OPTIONS.length)];
-    const teamA = selectPlaying11(teamAId);
-    const teamB = selectPlaying11(teamBId);
+    const selA = selectPlaying11(teamAId);
+    const selB = selectPlaying11(teamBId);
+    const teamA = selA.playing11;
+    const teamB = selB.playing11;
 
     // Toss
     const tossWinner = Math.random() > 0.5 ? teamAId : teamBId;
@@ -148,6 +150,38 @@ window.SimulationEngine = (function() {
     const teamBName = TEAMS.find(t => t.id === teamBId).shortName;
     const keyMoments = [];
 
+    // === IMPACT PLAYER RULE ===
+    // Each team can bring in 1 impact sub to replace a player
+    // Impact player is added to the playing XI (effectively 12th man who bats/bowls)
+    const impactA = selA.impactPlayer;
+    const impactB = selB.impactPlayer;
+    const batFirst11 = battingFirst === teamAId ? [...teamA] : [...teamB];
+    const bowlFirst11 = bowlingFirst === teamAId ? [...teamA] : [...teamB];
+    const batFirstImpact = battingFirst === teamAId ? impactA : impactB;
+    const bowlFirstImpact = bowlingFirst === teamAId ? impactA : impactB;
+
+    // Impact sub strategy: team batting first brings in impact after powerplay
+    // The impact player replaces the weakest non-bowling member
+    if (batFirstImpact) {
+      // Replace weakest non-core player (lowest rated non-bowler who isn't WK)
+      const replaceIdx = findImpactReplacement(batFirst11, batFirstImpact);
+      if (replaceIdx >= 0) {
+        const replaced = batFirst11[replaceIdx];
+        batFirst11[replaceIdx] = batFirstImpact;
+        const impactTeamName = battingFirst === teamAId ? teamAName : teamBName;
+        keyMoments.push({ text: `🔄 IMPACT PLAYER: ${impactTeamName} bring in ${batFirstImpact.name} for ${replaced.name}!`, highlight: true });
+      }
+    }
+    if (bowlFirstImpact) {
+      const replaceIdx = findImpactReplacement(bowlFirst11, bowlFirstImpact);
+      if (replaceIdx >= 0) {
+        const replaced = bowlFirst11[replaceIdx];
+        bowlFirst11[replaceIdx] = bowlFirstImpact;
+        const impactTeamName = bowlingFirst === teamAId ? teamAName : teamBName;
+        keyMoments.push({ text: `🔄 IMPACT PLAYER: ${impactTeamName} bring in ${bowlFirstImpact.name} for ${replaced.name}!`, highlight: true });
+      }
+    }
+
     // --- RAIN INTERRUPTION (~6% of non-playoff matches) ---
     let isRainAffected = false;
     if (!isPlayoff && Math.random() < 0.06) {
@@ -155,37 +189,32 @@ window.SimulationEngine = (function() {
       keyMoments.push({ text: `🌧️ RAIN! Match affected by rain delay!`, highlight: true });
     }
 
-    // --- UPSET FACTOR: weaker team gets a morale boost ---
-    // Compare squad strength loosely
-    const teamAStrength = teamA.reduce((s, p) => s + (p.stats.batting + p.stats.bowling) / 2, 0);
-    const teamBStrength = teamB.reduce((s, p) => s + (p.stats.batting + p.stats.bowling) / 2, 0);
+    // --- UPSET FACTOR ---
+    const teamAStrength = batFirst11.reduce((s, p) => s + (p.stats.batting + p.stats.bowling) / 2, 0);
+    const teamBStrength = bowlFirst11.reduce((s, p) => s + (p.stats.batting + p.stats.bowling) / 2, 0);
     let underdogBoost = null;
     const strengthDiff = Math.abs(teamAStrength - teamBStrength);
     if (strengthDiff > 40 && Math.random() < 0.2) {
-      // 20% chance underdog plays out of their skin
       underdogBoost = teamAStrength < teamBStrength ? teamAId : teamBId;
       const underdogName = TEAMS.find(t => t.id === underdogBoost).shortName;
-      keyMoments.push({ text: `💪 ${underdogName} are fired up today! Underdogs are playing with passion!`, highlight: true });
+      keyMoments.push({ text: `💪 ${underdogName} are fired up today!`, highlight: true });
     }
 
     // Simulate innings
     const innings1 = simulateInnings(
-      battingFirst === teamAId ? teamA : teamB,
-      battingFirst === teamAId ? teamB : teamA,
+      batFirst11, bowlFirst11,
       venue, weather, null, isPlayoff, false, underdogBoost, battingFirst
     );
 
-    // Rain-reduced target (DLS-lite): if rain affected, reduce target slightly
     let adjustedTarget = innings1.totalRuns + 1;
     if (isRainAffected) {
-      const reductionPct = 0.05 + Math.random() * 0.15; // 5-20% reduction
+      const reductionPct = 0.05 + Math.random() * 0.15;
       adjustedTarget = Math.floor(innings1.totalRuns * (1 - reductionPct)) + 1;
       keyMoments.push({ text: `🌧️ Revised target: ${adjustedTarget} (DLS method)`, highlight: false });
     }
 
     const innings2 = simulateInnings(
-      bowlingFirst === teamAId ? teamA : teamB,
-      bowlingFirst === teamAId ? teamB : teamA,
+      bowlFirst11, batFirst11,
       venue, weather, adjustedTarget, isPlayoff, weather.dewFactor > 0, underdogBoost, bowlingFirst
     );
 
@@ -196,8 +225,7 @@ window.SimulationEngine = (function() {
     if (innings2.totalRuns >= adjustedTarget) {
       winner = bowlingFirst;
       margin = `${10 - innings2.wickets} wickets`;
-      const balls = innings2.ballsBowled;
-      const oversLeft = ((120 - balls) / 6).toFixed(1);
+      const oversLeft = ((120 - innings2.ballsBowled) / 6).toFixed(1);
       margin += ` (${oversLeft} overs left)`;
       keyMoments.push({ text: `${TEAMS.find(t=>t.id===winner).shortName} win by ${margin}!`, highlight: true });
     } else if (innings2.totalRuns < innings1.totalRuns) {
@@ -205,19 +233,16 @@ window.SimulationEngine = (function() {
       margin = isRainAffected ? `${adjustedTarget - 1 - innings2.totalRuns} runs (DLS)` : `${innings1.totalRuns - innings2.totalRuns} runs`;
       keyMoments.push({ text: `${TEAMS.find(t=>t.id===winner).shortName} win by ${margin}!`, highlight: true });
     } else {
-      // Tie → Super Over: simulate mini-innings instead of coin flip
       keyMoments.push({ text: `🔥 IT'S A TIE! SUPER OVER TIME!`, highlight: true });
-      const soA = simulateSuperOver(battingFirst === teamAId ? teamA : teamB, bowlingFirst === teamAId ? teamB : teamA);
-      const soB = simulateSuperOver(bowlingFirst === teamAId ? teamA : teamB, battingFirst === teamAId ? teamB : teamA);
-      keyMoments.push({ text: `Super Over: ${teamAName} ${battingFirst === teamAId ? soA : soB}/${battingFirst === teamAId ? '?' : '?'} vs ${teamBName} ${battingFirst === teamBId ? soA : soB}`, highlight: false });
+      const soA = simulateSuperOver(batFirst11, bowlFirst11);
+      const soB = simulateSuperOver(bowlFirst11, batFirst11);
       if (soA > soB) {
         winner = battingFirst;
       } else if (soB > soA) {
         winner = bowlingFirst;
       } else {
-        // Even super over tied - boundary count or coin toss
         winner = Math.random() > 0.5 ? teamAId : teamBId;
-        keyMoments.push({ text: `EVEN THE SUPER OVER IS TIED! ${TEAMS.find(t=>t.id===winner).shortName} win on boundary count!`, highlight: true });
+        keyMoments.push({ text: `SUPER OVER TIED! ${TEAMS.find(t=>t.id===winner).shortName} win on boundary count!`, highlight: true });
       }
       margin = 'Super Over';
       keyMoments.push({ text: `${TEAMS.find(t=>t.id===winner).shortName} WIN THE SUPER OVER!`, highlight: true });
@@ -232,10 +257,58 @@ window.SimulationEngine = (function() {
       winner, margin,
       keyMoments,
       isPlayoff,
-      playing11A: teamA, playing11B: teamB
+      playing11A: battingFirst === teamAId ? batFirst11 : bowlFirst11,
+      playing11B: battingFirst === teamBId ? batFirst11 : bowlFirst11,
+      impactPlayerA: impactA, impactPlayerB: impactB
     };
   }
 
+  // Find which player to replace with impact player
+  // Replaces the weakest non-essential player (not WK, not top bowler)
+  function findImpactReplacement(playing11, impactPlayer) {
+    // If impact is a bowler/allrounder, replace weakest batter
+    // If impact is a batter, replace weakest bowler who isn't the only spinner/pacer
+    let candidates = [];
+    for (let i = 0; i < playing11.length; i++) {
+      const p = playing11[i];
+      // Don't replace the only wicketkeeper
+      if (p.role === 'wicketkeeper' && playing11.filter(x => x.role === 'wicketkeeper').length <= 1) continue;
+      candidates.push({ idx: i, player: p, rating: ratePlayer(p) });
+    }
+
+    if (candidates.length === 0) return -1;
+
+    // Replace lowest-rated player, preferring to swap like-for-unlike (batter for bowler etc.)
+    if (impactPlayer.role === 'bowler' || impactPlayer.role === 'allRounder') {
+      // Prefer replacing a weak batter
+      const batCandidates = candidates.filter(c => c.player.role === 'batter');
+      if (batCandidates.length > 0) {
+        batCandidates.sort((a, b) => a.rating - b.rating);
+        return batCandidates[0].idx;
+      }
+    } else {
+      // Prefer replacing a weak bowler
+      const bowlCandidates = candidates.filter(c => c.player.role === 'bowler');
+      if (bowlCandidates.length > 1) { // keep at least one pure bowler
+        bowlCandidates.sort((a, b) => a.rating - b.rating);
+        return bowlCandidates[0].idx;
+      }
+    }
+
+    // Fallback: replace weakest overall
+    candidates.sort((a, b) => a.rating - b.rating);
+    return candidates[0].idx;
+  }
+
+  function ratePlayer(p) {
+    const form = tournament.playerForms[p.id];
+    const formMod = form ? form.currentForm / 70 : 1;
+    const primary = p.role === 'bowler' ? p.stats.bowling : p.role === 'allRounder' ? (p.stats.batting + p.stats.bowling) / 2 : p.stats.batting;
+    return primary * formMod;
+  }
+
+  // Select Playing XI + Impact Player substitute
+  // Returns { playing11, impactPlayer, impactSubs, overseasInXI }
   function selectPlaying11(teamId) {
     const ts = tournament.teamStates[teamId];
     const squad = ts.squad.map(s => s.player);
@@ -246,23 +319,15 @@ window.SimulationEngine = (function() {
       return !form || !form.isInjured;
     });
 
-    // Must pick max 4 overseas
+    // Must pick max 4 overseas in starting XI
     const indians = available.filter(p => !p.isOverseas);
     const overseas = available.filter(p => p.isOverseas);
-
-    // Sort by composite rating
-    const ratePlayer = (p) => {
-      const form = tournament.playerForms[p.id];
-      const formMod = form ? form.currentForm / 70 : 1;
-      const primary = p.role === 'bowler' ? p.stats.bowling : p.role === 'allRounder' ? (p.stats.batting + p.stats.bowling) / 2 : p.stats.batting;
-      return primary * formMod;
-    };
 
     overseas.sort((a, b) => ratePlayer(b) - ratePlayer(a));
     indians.sort((a, b) => ratePlayer(b) - ratePlayer(a));
 
     const selected = [];
-    const overseasPick = overseas.slice(0, 4);
+    const overseasPick = overseas.slice(0, 4); // max 4 overseas
     selected.push(...overseasPick);
 
     // Fill remaining 7 with best Indians, ensuring role balance
@@ -280,6 +345,19 @@ window.SimulationEngine = (function() {
       }
     }
 
+    // Ensure at least 5 bowlers/allrounders who can bowl
+    const canBowl = selected.filter(p => p.role === 'bowler' || p.role === 'allRounder' || (p.bowlingStyle && p.stats.bowling > 25));
+    let bowlersNeeded = Math.max(0, 5 - canBowl.length);
+    while (bowlersNeeded > 0 && remaining > 0 && indianPool.length > 0) {
+      const bowler = indianPool.find(p => p.role === 'bowler' || p.role === 'allRounder');
+      if (bowler) {
+        selected.push(bowler);
+        indianPool.splice(indianPool.indexOf(bowler), 1);
+        remaining--;
+        bowlersNeeded--;
+      } else break;
+    }
+
     // Fill rest by rating
     for (let i = 0; i < remaining && indianPool.length > 0; i++) {
       selected.push(indianPool.shift());
@@ -287,12 +365,42 @@ window.SimulationEngine = (function() {
 
     // If still < 11, add any available
     while (selected.length < 11 && available.length > selected.length) {
-      const remaining2 = available.filter(p => !selected.includes(p));
-      if (remaining2.length > 0) selected.push(remaining2[0]);
+      const rest = available.filter(p => !selected.includes(p));
+      if (rest.length > 0) selected.push(rest[0]);
       else break;
     }
 
-    return selected;
+    // === IMPACT PLAYER SELECTION ===
+    // Pick 4 substitutes from remaining squad, then choose 1 as impact player
+    const overseasInXI = selected.filter(p => p.isOverseas).length;
+    const remainingSquad = available.filter(p => !selected.includes(p));
+    remainingSquad.sort((a, b) => ratePlayer(b) - ratePlayer(a));
+
+    // Substitutes: up to 4 players
+    const subs = remainingSquad.slice(0, 4);
+
+    // Choose best substitute as impact player
+    // If 4 overseas in XI, impact player must be Indian
+    let impactPlayer = null;
+    if (subs.length > 0) {
+      const eligibleSubs = overseasInXI >= 4 ? subs.filter(p => !p.isOverseas) : subs;
+      if (eligibleSubs.length > 0) {
+        // Pick based on what team needs: if batting is weak, pick a batter; if bowling, pick bowler
+        const batCount = selected.filter(p => p.role === 'batter' || p.role === 'wicketkeeper').length;
+        const bowlCount = selected.filter(p => p.role === 'bowler').length;
+
+        if (bowlCount < 4) {
+          // Need more bowling — prefer allrounder/bowler
+          impactPlayer = eligibleSubs.find(p => p.role === 'bowler' || p.role === 'allRounder') || eligibleSubs[0];
+        } else {
+          // Default: pick highest rated
+          impactPlayer = eligibleSubs[0];
+        }
+      }
+    }
+
+    // Store impact player info on tournament for this match
+    return { playing11: selected, impactPlayer, overseasInXI };
   }
 
   // Super Over: 6 balls, pick best batter + best bowler
@@ -483,26 +591,26 @@ window.SimulationEngine = (function() {
     const formMod = form ? form.currentForm / 70 : 1;
     const bowlerFormMod = bowlerForm ? bowlerForm.currentForm / 70 : 1;
 
-    // Base rates by phase
+    // Base rates by phase (calibrated to real IPL: ~160-175 avg total, SR ~135-145)
     let wicketProb, dotProb, singleProb, twoProb, fourProb, sixProb;
     if (phase === 'powerplay') {
-      wicketProb = 0.04; dotProb = 0.28; singleProb = 0.30; twoProb = 0.12; fourProb = 0.18; sixProb = 0.08;
+      wicketProb = 0.05; dotProb = 0.33; singleProb = 0.28; twoProb = 0.08; fourProb = 0.15; sixProb = 0.05;
     } else if (phase === 'middle') {
-      wicketProb = 0.05; dotProb = 0.35; singleProb = 0.30; twoProb = 0.12; fourProb = 0.12; sixProb = 0.06;
+      wicketProb = 0.06; dotProb = 0.38; singleProb = 0.28; twoProb = 0.08; fourProb = 0.10; sixProb = 0.04;
     } else { // death
-      wicketProb = 0.06; dotProb = 0.22; singleProb = 0.25; twoProb = 0.10; fourProb = 0.20; sixProb = 0.17;
+      wicketProb = 0.07; dotProb = 0.28; singleProb = 0.24; twoProb = 0.09; fourProb = 0.14; sixProb = 0.09;
     }
 
-    // Batter skill modifier
-    const batRating = batter.stats.batting / 70;
-    fourProb *= batRating * formMod;
-    sixProb *= batRating * formMod;
-    singleProb *= (0.8 + batRating * 0.3);
+    // Batter skill modifier (dampened - /85 instead of /70 to avoid inflation)
+    const batRating = batter.stats.batting / 85;
+    fourProb *= (0.7 + batRating * 0.4) * formMod;
+    sixProb *= (0.6 + batRating * 0.4) * formMod;
+    singleProb *= (0.85 + batRating * 0.2);
 
-    // Bowler skill modifier
-    const bowlRating = bowler.stats.bowling / 70;
-    wicketProb *= bowlRating * bowlerFormMod;
-    dotProb *= (0.7 + bowlRating * 0.4);
+    // Bowler skill modifier (dampened)
+    const bowlRating = bowler.stats.bowling / 85;
+    wicketProb *= (0.6 + bowlRating * 0.5) * bowlerFormMod;
+    dotProb *= (0.75 + bowlRating * 0.3);
 
     // Pitch modifiers
     const isPace = bowler.bowlingStyle && (bowler.bowlingStyle.includes('F') || bowler.bowlingStyle.includes('RF'));
@@ -551,84 +659,80 @@ window.SimulationEngine = (function() {
       }
     }
 
-    // Consistency modifier - inconsistent batters have more variance
+    // Consistency modifier - inconsistent batters have more variance (mild)
     if (batter.stats.consistency < 60) {
       if (Math.random() > 0.5) {
-        fourProb *= 1.3; sixProb *= 1.3;
+        fourProb *= 1.1; sixProb *= 1.1; // good day
       } else {
-        wicketProb *= 1.4;
+        wicketProb *= 1.2; // bad day
       }
     }
 
-    // Underdog boost: batting team plays above their level
+    // Underdog boost: batting team plays above their level (mild)
     if (isUnderdog) {
-      fourProb *= 1.15;
-      sixProb *= 1.1;
-      wicketProb *= 0.85;
+      fourProb *= 1.08;
+      sixProb *= 1.05;
+      wicketProb *= 0.92;
     }
 
     // Momentum: collapse (recent wickets make next batter nervous)
     if (recentWickets >= 2) {
-      wicketProb *= (1 + recentWickets * 0.12);
-      dotProb *= 1.15;
-      fourProb *= 0.8;
+      wicketProb *= (1 + recentWickets * 0.08);
+      dotProb *= 1.1;
+      fourProb *= 0.9;
     }
 
-    // Momentum: hot streak (recent boundaries = batter is timing everything)
+    // Momentum: hot streak (recent boundaries)
     if (recentBoundaries >= 3) {
-      fourProb *= 1.2;
-      sixProb *= 1.15;
-      wicketProb *= 0.85;
+      fourProb *= 1.1;
+      sixProb *= 1.08;
+      wicketProb *= 0.92;
     }
 
-    // --- UNPREDICTABILITY FACTORS ---
+    // --- UNPREDICTABILITY FACTORS (subtle, not stat-inflating) ---
 
-    // 1. Magic ball / unplayable delivery (~2% chance)
-    if (Math.random() < 0.02) {
-      wicketProb *= 3.0; // almost certain wicket
-      dotProb *= 1.5;
-      fourProb *= 0.2;
+    // 1. Magic ball / unplayable delivery (~1.5%)
+    if (Math.random() < 0.015) {
+      wicketProb *= 2.0;
+      fourProb *= 0.3;
       sixProb *= 0.1;
     }
 
-    // 2. Dropped catch / missed stumping (~3% - reduces effective wicket prob)
-    if (Math.random() < 0.03) {
-      wicketProb *= 0.15; // should have been out but wasn't
+    // 2. Dropped catch / missed stumping (~2%)
+    if (Math.random() < 0.02) {
+      wicketProb *= 0.2;
     }
 
-    // 3. Batter "in the zone" hot streak (~4% per ball)
-    if (form && form.currentForm > 70 && Math.random() < 0.04) {
-      fourProb *= 1.8;
-      sixProb *= 2.0;
-      wicketProb *= 0.4;
+    // 3. Batter hot streak (~2% per ball, mild boost)
+    if (form && form.currentForm > 70 && Math.random() < 0.02) {
+      fourProb *= 1.25;
+      sixProb *= 1.3;
+      wicketProb *= 0.75;
     }
 
-    // 4. Last-over thriller: final over of chase, everything is amplified
+    // 4. Last-over thriller: final over of close chase
     if (target && over === 19) {
       const needed = target - currentScore;
-      if (needed > 0 && needed <= 20) {
-        sixProb *= 1.5;
-        fourProb *= 1.3;
-        wicketProb *= 1.2;
+      if (needed > 0 && needed <= 15) {
+        sixProb *= 1.2;
+        fourProb *= 1.1;
+        wicketProb *= 1.1;
       }
     }
 
-    // 6. Random variance injection: slight chaos on every ball
+    // 5. Random variance (~2% each way)
     const chaosRoll = Math.random();
-    if (chaosRoll < 0.03) {
-      // Freak boundary (misfield, edge through slips, overthrow)
-      fourProb *= 2.0;
-    } else if (chaosRoll < 0.06) {
-      // Dot ball pressure cluster
-      dotProb *= 1.5;
-      wicketProb *= 1.15;
+    if (chaosRoll < 0.02) {
+      fourProb *= 1.3; // misfield
+    } else if (chaosRoll < 0.04) {
+      dotProb *= 1.15;
     }
 
-    // 7. Underdog factor: weaker batter occasionally plays innings of their life
-    if (batter.stats.batting < 55 && Math.random() < 0.06) {
-      fourProb *= 1.6;
-      sixProb *= 1.4;
-      wicketProb *= 0.6;
+    // 6. Underdog factor: weaker batter occasionally plays well (~3%)
+    if (batter.stats.batting < 55 && Math.random() < 0.03) {
+      fourProb *= 1.2;
+      sixProb *= 1.15;
+      wicketProb *= 0.8;
     }
 
     // Normalize probabilities
