@@ -234,6 +234,7 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onAuctionStart) Lobby.callbacks.onAuctionStart();
     });
 
+    // Player action events (player → host)
     realtimeChannel.on('broadcast', { event: 'bid' }, ({ payload }) => {
       if (Lobby.callbacks.onBid) Lobby.callbacks.onBid(payload);
     });
@@ -246,8 +247,13 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onPauseRequest) Lobby.callbacks.onPauseRequest(payload);
     });
 
+    // Game state events (host → all players)
     realtimeChannel.on('broadcast', { event: 'new_player' }, ({ payload }) => {
       if (Lobby.callbacks.onNewPlayer) Lobby.callbacks.onNewPlayer(payload);
+    });
+
+    realtimeChannel.on('broadcast', { event: 'bid_update' }, ({ payload }) => {
+      if (Lobby.callbacks.onBidUpdate) Lobby.callbacks.onBidUpdate(payload);
     });
 
     realtimeChannel.on('broadcast', { event: 'sold' }, ({ payload }) => {
@@ -260,6 +266,10 @@ window.Lobby = (function() {
 
     realtimeChannel.on('broadcast', { event: 'timer_update' }, ({ payload }) => {
       if (Lobby.callbacks.onTimerUpdate) Lobby.callbacks.onTimerUpdate(payload);
+    });
+
+    realtimeChannel.on('broadcast', { event: 'auction_end' }, ({ payload }) => {
+      if (Lobby.callbacks.onAuctionEnd) Lobby.callbacks.onAuctionEnd(payload);
     });
 
     realtimeChannel.subscribe(async (status) => {

@@ -335,8 +335,12 @@ window.App = (function() {
   }
 
   function placeBidFor(teamId) {
-    AuctionEngine.humanBid(teamId);
-    // Controls stay visible — will be refreshed by onBid callback
+    // In online mode, non-host sends bid via broadcast
+    if (window.onlineMode && window.Lobby && !Lobby.isHost()) {
+      Lobby.sendBid(teamId, 0);
+    } else {
+      AuctionEngine.humanBid(teamId);
+    }
   }
 
   function passBid() {
@@ -346,8 +350,12 @@ window.App = (function() {
   }
 
   function passBidFor(teamId) {
-    AuctionEngine.humanPass(teamId);
-    showBidControlsForAllHumans(); // refresh controls
+    if (window.onlineMode && window.Lobby && !Lobby.isHost()) {
+      Lobby.sendPass(teamId);
+    } else {
+      AuctionEngine.humanPass(teamId);
+    }
+    showBidControlsForAllHumans();
   }
 
   function onTimerUpdate(remaining) {
@@ -793,6 +801,37 @@ window.App = (function() {
     }
   }
 
+  // Handle online broadcast events from other players
+  function handleOnlineEvent(event, payload) {
+    switch (event) {
+      case 'new_player':
+        if (payload.player) renderAuctionPlayer(payload.player);
+        if (payload.state) {
+          document.getElementById('auction-player-num').textContent = (payload.state.currentIndex || 0) + 1;
+          document.getElementById('auction-phase').textContent = payload.state.phase || '';
+        }
+        break;
+      case 'bid_update':
+        if (payload.teamId && payload.amount) onBid(payload.teamId, payload.amount);
+        break;
+      case 'sold':
+        if (payload.player && payload.teamId) onSold(payload.player, payload.teamId, payload.price);
+        break;
+      case 'unsold':
+        if (payload.player) onUnsold(payload.player);
+        break;
+      case 'timer_update':
+        if (payload.remaining !== undefined) onTimerUpdate(payload.remaining);
+        break;
+      case 'log':
+        if (payload.msg) addAuctionLog(payload.msg, payload.type || '');
+        break;
+      case 'auction_end':
+        onAuctionEnd();
+        break;
+    }
+  }
+
   function simulateAuction() {
     if (!confirm('This will simulate the entire remaining auction instantly (all AI). Continue?')) return;
 
@@ -810,7 +849,7 @@ window.App = (function() {
 
   return {
     showScreen, renamePlayer, startAuction, startAuctionWithTeams, placeBid, passBid,
-    placeBidFor, passBidFor, togglePause, simulateAuction,
+    placeBidFor, passBidFor, togglePause, simulateAuction, handleOnlineEvent,
     viewSquad, showReviewTeam, startTournament,
     simNext, simFive, simAll
   };

@@ -468,15 +468,81 @@
       }
     }
 
+    // Track if we're in online mode and whether we're the host
+    window.onlineMode = false;
+    let onlineHumanTeams = {};
+
     async function startOnlineAuction() {
       const players = await Lobby.getRoomPlayers();
-      const humanTeams = {};
+      onlineHumanTeams = {};
       players.forEach(p => {
-        if (p.team_id) humanTeams[p.team_id] = p.display_name;
+        if (p.team_id) onlineHumanTeams[p.team_id] = p.display_name;
       });
-      // Use existing App.startAuction flow but with online human teams
-      // For now, start the offline auction with the room's team picks
-      App.startAuctionWithTeams(humanTeams);
+      window.onlineMode = true;
+
+      if (Lobby.isHost()) {
+        // HOST: run the auction engine and broadcast all events to other players
+        App.startAuctionWithTeams(onlineHumanTeams);
+        wireHostBroadcasts();
+      } else {
+        // NON-HOST: init UI but don't run engine - listen for host broadcasts
+        App.startAuctionWithTeams(onlineHumanTeams);
+        AuctionEngine.pause(); // host controls the engine
+        wireClientListeners();
+      }
+    }
+
+    function wireHostBroadcasts() {
+      // After startAuctionWithTeams sets up callbacks, wrap them to also broadcast
+      const st = AuctionEngine.getState();
+      const orig = { ...st.callbacks };
+
+      AuctionEngine.on('newPlayer', (player) => {
+        if (orig.onNewPlayer) orig.onNewPlayer(player);
+        Lobby.broadcastGameState('new_player', { player, currentIndex: st.currentIndex, phase: st.phase });
+      });
+      AuctionEngine.on('bid', (teamId, amount) => {
+        if (orig.onBid) orig.onBid(teamId, amount);
+        Lobby.broadcastGameState('bid_update', { teamId, amount });
+      });
+      AuctionEngine.on('sold', (player, teamId, price) => {
+        if (orig.onSold) orig.onSold(player, teamId, price);
+        Lobby.broadcastGameState('sold', { player, teamId, price });
+      });
+      AuctionEngine.on('unsold', (player) => {
+        if (orig.onUnsold) orig.onUnsold(player);
+        Lobby.broadcastGameState('unsold', { player });
+      });
+      AuctionEngine.on('timerUpdate', (remaining) => {
+        if (orig.onTimerUpdate) orig.onTimerUpdate(remaining);
+        Lobby.broadcastGameState('timer_update', { remaining });
+      });
+      AuctionEngine.on('auctionEnd', () => {
+        if (orig.onAuctionEnd) orig.onAuctionEnd();
+        Lobby.broadcastGameState('auction_end', { teamStates: AuctionEngine.getAllTeamStates() });
+      });
+
+      // Receive remote bids/passes from non-host players
+      Lobby.callbacks.onBid = (payload) => {
+        if (payload.teamId && payload.userId !== Auth.getUser().id) {
+          AuctionEngine.humanBid(payload.teamId);
+        }
+      };
+      Lobby.callbacks.onPass = (payload) => {
+        if (payload.teamId && payload.userId !== Auth.getUser().id) {
+          AuctionEngine.humanPass(payload.teamId);
+        }
+      };
+    }
+
+    function wireClientListeners() {
+      // Non-host listens for all game state events from host
+      Lobby.callbacks.onNewPlayer = (payload) => App.handleOnlineEvent('new_player', payload);
+      Lobby.callbacks.onBidUpdate = (payload) => App.handleOnlineEvent('bid_update', payload);
+      Lobby.callbacks.onSold = (payload) => App.handleOnlineEvent('sold', payload);
+      Lobby.callbacks.onUnsold = (payload) => App.handleOnlineEvent('unsold', payload);
+      Lobby.callbacks.onTimerUpdate = (payload) => App.handleOnlineEvent('timer_update', payload);
+      Lobby.callbacks.onAuctionEnd = (payload) => App.handleOnlineEvent('auction_end', payload);
     }
 
     async function loadActiveRooms() {
