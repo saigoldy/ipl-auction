@@ -254,13 +254,16 @@ window.App = (function() {
   }
 
   function onHumanTurn(humanTeamIds) {
-    activeHumanTeams = humanTeamIds;
-    currentHumanIdx = 0;
-
-    // In online client mode, show controls directly (engine state is empty)
+    // In online mode, only track THIS user's team — not all human teams
     if (window.onlineMode && window.myOnlineTeamId) {
+      activeHumanTeams = humanTeamIds.includes(window.myOnlineTeamId)
+        ? [window.myOnlineTeamId] : [];
+      currentHumanIdx = 0;
       showOnlineBidControls();
     } else {
+      // Offline: show all human teams
+      activeHumanTeams = humanTeamIds;
+      currentHumanIdx = 0;
       showBidControlsForAllHumans();
     }
   }
