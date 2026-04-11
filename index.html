@@ -247,6 +247,7 @@
   <script src="js/supabase-config.js"></script>
   <script src="data/teams.js"></script>
   <script src="data/players.js"></script>
+  <script src="js/data-loader.js"></script>
   <script src="js/auction.js"></script>
   <script src="js/simulation.js"></script>
   <script src="js/auth.js"></script>
@@ -449,6 +450,8 @@
     document.addEventListener('DOMContentLoaded', async () => {
       const sb = initSupabase();
       if (sb && SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
+        // Load data from Supabase (falls back to local JS files)
+        await DataLoader.init();
         const user = await Auth.init();
         if (user) {
           Auth.showApp();
