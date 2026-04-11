@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IPL Mega Auction & Simulation</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- ===== HOME SCREEN ===== -->
+  <section id="screen-home" class="screen active">
+    <div class="home-container">
+      <div class="ipl-logo">🏏</div>
+      <h1 class="title-glow">IPL MEGA AUCTION</h1>
+      <p class="subtitle">& Tournament Simulation</p>
+      <div class="home-info">
+        <div class="info-card"><span class="info-num">10</span><span class="info-label">Teams</span></div>
+        <div class="info-card"><span class="info-num">₹125 Cr</span><span class="info-label">Per Team</span></div>
+        <div class="info-card"><span class="info-num">200+</span><span class="info-label">Players</span></div>
+      </div>
+      <button class="btn btn-primary btn-large" onclick="App.showScreen('team-select')">Start Auction</button>
+    </div>
+  </section>
+
+  <!-- ===== TEAM SELECTION SCREEN ===== -->
+  <section id="screen-team-select" class="screen">
+    <div class="team-select-container">
+      <h2>Choose Your Teams</h2>
+      <p class="screen-desc">Click a team to cycle: <span class="badge badge-ai">AI</span> → <span class="badge badge-human">Player 1</span> → <span class="badge badge-human">Player 2</span> ... Click again to reset to AI. You need at least 1 human player.</p>
+      <div id="team-select-grid" class="team-grid"></div>
+      <div class="human-players-section">
+        <h3>Human Players</h3>
+        <div id="human-player-list" class="human-list"></div>
+      </div>
+      <button class="btn btn-primary btn-large" id="btn-start-auction" onclick="App.startAuction()" disabled>Begin Auction</button>
+    </div>
+  </section>
+
+  <!-- ===== AUCTION SCREEN ===== -->
+  <section id="screen-auction" class="screen">
+    <div class="auction-header">
+      <div class="auction-title">IPL MEGA AUCTION</div>
+      <div class="auction-progress">
+        <span id="auction-phase">MARQUEE</span> |
+        Player <span id="auction-player-num">1</span> of <span id="auction-total-players">0</span>
+      </div>
+      <button class="btn btn-pause" id="btn-pause" onclick="App.togglePause()">⏸ PAUSE</button>
+    </div>
+    <div class="auction-main">
+      <!-- Left: Current Player -->
+      <div class="auction-player-panel">
+        <div id="player-card" class="player-card">
+          <div class="player-flag" id="player-flag"></div>
+          <h2 id="player-name">-</h2>
+          <div class="player-meta">
+            <span id="player-role" class="role-badge">-</span>
+            <span id="player-nationality">-</span>
+            <span id="player-age">-</span>
+          </div>
+          <div class="player-stats-grid" id="player-stats-grid"></div>
+          <div class="player-history" id="player-history"></div>
+          <div class="base-price">Base: <span id="player-base-price">-</span></div>
+        </div>
+      </div>
+
+      <!-- Center: Bidding Area -->
+      <div class="auction-bid-panel">
+        <div class="current-bid-display">
+          <div class="bid-label">CURRENT BID</div>
+          <div class="bid-amount" id="bid-amount">-</div>
+          <div class="bid-team" id="bid-team">No bids yet</div>
+        </div>
+        <div class="bid-timer-container">
+          <div class="bid-timer-bar" id="bid-timer-bar"></div>
+        </div>
+        <div class="bid-controls" id="bid-controls">
+          <div class="active-bidder-label" id="active-bidder-label">Your Turn</div>
+          <button class="btn btn-bid" id="btn-bid" onclick="App.placeBid()">
+            BID <span id="btn-bid-amount"></span>
+          </button>
+          <button class="btn btn-pass" id="btn-pass" onclick="App.passBid()">PASS</button>
+          <div class="bid-helper" id="bid-helper"></div>
+        </div>
+        <div class="sold-overlay" id="sold-overlay">
+          <div class="sold-text" id="sold-text">SOLD!</div>
+        </div>
+        <div class="auction-log" id="auction-log"></div>
+      </div>
+
+      <!-- Right: Squad Panel -->
+      <div class="auction-squad-panel">
+        <div class="squad-tabs" id="squad-tabs"></div>
+        <div class="squad-content" id="squad-content"></div>
+      </div>
+    </div>
+
+    <!-- Bottom: All Teams Budget Bar -->
+    <div class="teams-budget-bar" id="teams-budget-bar"></div>
+  </section>
+
+  <!-- ===== SQUAD REVIEW SCREEN ===== -->
+  <section id="screen-squad-review" class="screen">
+    <h2 class="section-title">Squad Review</h2>
+    <div class="squad-review-tabs" id="review-tabs"></div>
+    <div class="squad-review-content" id="review-content"></div>
+    <button class="btn btn-primary btn-large" onclick="App.startTournament()">Start IPL Tournament</button>
+  </section>
+
+  <!-- ===== TOURNAMENT SCREEN ===== -->
+  <section id="screen-tournament" class="screen">
+    <div class="tournament-layout">
+      <div class="tournament-left">
+        <h3>Points Table</h3>
+        <table class="points-table" id="points-table">
+          <thead>
+            <tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>L</th><th>NRR</th><th>Pts</th></tr>
+          </thead>
+          <tbody id="points-tbody"></tbody>
+        </table>
+      </div>
+      <div class="tournament-right">
+        <div class="match-header">
+          <h3 id="match-title">League Stage</h3>
+          <span id="match-counter">Match 0 of 70</span>
+        </div>
+        <div class="match-center" id="match-center">
+          <p>Click "Simulate Next" to begin the tournament!</p>
+        </div>
+        <div class="sim-controls">
+          <button class="btn btn-primary" id="btn-sim-next" onclick="App.simNext()">Simulate Next Match</button>
+          <button class="btn btn-secondary" id="btn-sim-five" onclick="App.simFive()">Sim 5 Matches</button>
+          <button class="btn btn-secondary" id="btn-sim-all" onclick="App.simAll()">Sim All League</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Playoffs bracket -->
+    <div class="playoffs-bracket" id="playoffs-bracket" style="display:none;">
+      <h3>Playoffs</h3>
+      <div class="bracket-container" id="bracket-container"></div>
+    </div>
+  </section>
+
+  <!-- ===== RESULT SCREEN ===== -->
+  <section id="screen-result" class="screen">
+    <div class="result-container" id="result-container"></div>
+    <button class="btn btn-primary btn-large" onclick="location.reload()">Play Again</button>
+  </section>
+
+  <script src="data/teams.js"></script>
+  <script src="data/players.js"></script>
+  <script src="js/auction.js"></script>
+  <script src="js/simulation.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,445 @@
+/* ===== BASE & RESET ===== */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --bg: #0f0f1a;
+  --card: #1a1a2e;
+  --card2: #16213e;
+  --gold: #D4A843;
+  --gold-dim: #a88a3a;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --green: #4CAF50;
+  --red: #f44336;
+  --blue: #2196F3;
+}
+body {
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+.screen { display: none; min-height: 100vh; padding: 20px; overflow-x: hidden; overflow-y: auto; }
+.screen.active { display: block; }
+a { color: var(--gold); }
+
+/* ===== BUTTONS ===== */
+.btn {
+  border: none; padding: 12px 28px; border-radius: 8px; font-size: 16px;
+  font-weight: 600; cursor: pointer; transition: all 0.2s; text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--gold); color: #000; }
+.btn-primary:hover:not(:disabled) { background: #ecc054; transform: translateY(-2px); box-shadow: 0 4px 15px rgba(212,168,67,0.3); }
+.btn-secondary { background: var(--card2); color: var(--text); border: 1px solid #333; }
+.btn-secondary:hover:not(:disabled) { background: #1e2d4a; }
+.btn-large { padding: 16px 48px; font-size: 20px; }
+.btn-bid { background: var(--green); color: #fff; font-size: 20px; padding: 14px 40px; min-width: 200px; }
+.btn-bid:hover:not(:disabled) { background: #66BB6A; transform: scale(1.05); }
+.btn-pass { background: var(--red); color: #fff; padding: 14px 30px; font-size: 16px; }
+.btn-pass:hover:not(:disabled) { background: #e57373; }
+.btn-pause { background: #FF9800; color: #000; padding: 8px 20px; font-size: 14px; }
+.btn-pause:hover { background: #FFB74D; }
+.btn-pause.paused { background: var(--green); animation: pausePulse 1s infinite; }
+@keyframes pausePulse { 0%,100%{opacity:1} 50%{opacity:0.7} }
+.pause-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.7); display: flex; justify-content: center; align-items: center;
+  z-index: 100; backdrop-filter: blur(4px);
+}
+.pause-overlay .pause-text { font-size: 48px; font-weight: 900; color: var(--gold); text-align: center; }
+.pause-overlay .pause-sub { font-size: 18px; color: var(--text-dim); margin-top: 10px; }
+
+/* ===== BADGES ===== */
+.badge { padding: 2px 10px; border-radius: 12px; font-size: 12px; font-weight: 700; }
+.badge-ai { background: #333; color: #aaa; }
+.badge-human { background: var(--gold); color: #000; }
+.role-badge {
+  padding: 3px 12px; border-radius: 12px; font-size: 12px; font-weight: 700;
+  text-transform: uppercase;
+}
+.role-batter { background: #1565C0; color: #fff; }
+.role-bowler { background: #C62828; color: #fff; }
+.role-allRounder { background: #6A1B9A; color: #fff; }
+.role-wicketkeeper { background: #F57F17; color: #000; }
+
+/* ===== HOME SCREEN ===== */
+.home-container { text-align: center; padding-top: 12vh; }
+.ipl-logo { font-size: 80px; margin-bottom: 20px; animation: float 3s ease-in-out infinite; }
+.title-glow { font-size: 52px; font-weight: 900; color: var(--gold); text-shadow: 0 0 30px rgba(212,168,67,0.4); letter-spacing: 4px; }
+.subtitle { font-size: 22px; color: var(--text-dim); margin: 10px 0 40px; }
+.home-info { display: flex; justify-content: center; gap: 30px; margin-bottom: 50px; }
+.info-card { background: var(--card); padding: 20px 30px; border-radius: 12px; text-align: center; border: 1px solid #2a2a3e; }
+.info-num { display: block; font-size: 28px; font-weight: 800; color: var(--gold); }
+.info-label { font-size: 14px; color: var(--text-dim); }
+@keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-10px)} }
+
+/* ===== TEAM SELECT ===== */
+.team-select-container { max-width: 1100px; margin: 0 auto; text-align: center; }
+.team-select-container h2 { font-size: 32px; color: var(--gold); margin-bottom: 10px; }
+.screen-desc { color: var(--text-dim); margin-bottom: 30px; }
+.team-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 30px; }
+.team-select-card {
+  background: var(--card); border: 2px solid #2a2a3e; border-radius: 12px;
+  padding: 20px 12px; text-align: center; cursor: pointer; transition: all 0.25s;
+  position: relative;
+}
+.team-select-card:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(0,0,0,0.3); }
+.team-select-card.selected { border-color: var(--gold); box-shadow: 0 0 20px rgba(212,168,67,0.2); }
+.team-select-card .team-emoji { font-size: 36px; margin-bottom: 8px; }
+.team-select-card .team-name { font-weight: 700; font-size: 14px; margin-bottom: 4px; }
+.team-select-card .team-city { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.team-select-card .owner-badge {
+  display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 700;
+}
+.human-players-section { margin: 20px 0; }
+.human-list { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 10px; }
+.human-chip { background: var(--card2); padding: 8px 16px; border-radius: 20px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.human-chip input { background: transparent; border: 1px solid #444; color: var(--text); padding: 4px 8px; border-radius: 6px; width: 120px; font-size: 13px; }
+
+/* ===== AUCTION SCREEN ===== */
+.auction-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 20px; background: var(--card); border-radius: 10px; margin-bottom: 16px;
+}
+.auction-title { font-size: 20px; font-weight: 800; color: var(--gold); letter-spacing: 2px; }
+.auction-progress { color: var(--text-dim); font-size: 14px; }
+#auction-phase { font-weight: 700; color: var(--gold); }
+
+.auction-main { display: grid; grid-template-columns: 280px 1fr 300px; gap: 16px; height: calc(100vh - 220px); overflow: hidden; }
+
+/* Player Panel */
+.auction-player-panel { overflow-y: auto; }
+.player-card {
+  background: var(--card); border-radius: 12px; padding: 20px; text-align: center;
+  border: 1px solid #2a2a3e; animation: slideIn 0.4s ease;
+}
+@keyframes slideIn { from { opacity:0; transform:translateX(-30px); } to { opacity:1; transform:translateX(0); } }
+.player-flag { font-size: 14px; margin-bottom: 5px; }
+.player-card h2 { font-size: 22px; margin-bottom: 8px; }
+.player-meta { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 12px; font-size: 13px; }
+.player-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 12px 0; }
+.stat-item { background: var(--card2); padding: 6px; border-radius: 6px; font-size: 12px; }
+.stat-label { color: var(--text-dim); }
+.stat-val { font-weight: 700; color: var(--gold); }
+.player-history { font-size: 12px; color: var(--text-dim); margin: 8px 0; }
+.base-price { font-size: 18px; font-weight: 700; color: var(--gold); margin-top: 10px; }
+
+/* Bid Panel */
+.auction-bid-panel { display: flex; flex-direction: column; position: relative; overflow: hidden; }
+.current-bid-display { background: var(--card); border-radius: 12px; padding: 24px; text-align: center; margin-bottom: 12px; }
+.bid-label { font-size: 14px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 2px; }
+.bid-amount { font-size: 52px; font-weight: 900; color: var(--gold); font-family: 'Courier New', monospace; }
+.bid-amount.pulse { animation: bidPulse 0.3s ease; }
+@keyframes bidPulse { 0%{transform:scale(1)} 50%{transform:scale(1.15)} 100%{transform:scale(1)} }
+.bid-team { font-size: 18px; font-weight: 700; margin-top: 5px; }
+
+.bid-timer-container { height: 6px; background: #222; border-radius: 3px; margin-bottom: 12px; overflow: hidden; }
+.bid-timer-bar { height: 100%; background: var(--gold); border-radius: 3px; width: 100%; transition: width linear; }
+.bid-timer-bar.urgent { background: var(--red); }
+
+.bid-controls { text-align: center; padding: 16px; background: var(--card); border-radius: 12px; margin-bottom: 12px; }
+.bid-controls.hidden { visibility: hidden; }
+.active-bidder-label { font-size: 16px; font-weight: 700; color: var(--gold); margin-bottom: 10px; }
+.bid-helper { font-size: 12px; color: var(--text-dim); margin-top: 8px; }
+
+.sold-overlay {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  display: none; justify-content: center; align-items: center;
+  background: rgba(0,0,0,0.85); z-index: 10; border-radius: 12px;
+}
+.sold-overlay.show { display: flex; animation: fadeIn 0.2s; }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+.sold-text { font-size: 64px; font-weight: 900; text-transform: uppercase; animation: stampIn 0.4s ease; }
+.sold-text.sold { color: var(--green); }
+.sold-text.unsold { color: var(--red); }
+@keyframes stampIn { from{transform:scale(3);opacity:0} to{transform:scale(1);opacity:1} }
+
+.auction-log {
+  flex: 1; background: var(--card); border-radius: 12px; padding: 12px;
+  overflow-y: auto; font-size: 13px; line-height: 1.6;
+  max-height: 250px; min-height: 100px;
+}
+.log-entry { padding: 4px 0; border-bottom: 1px solid #1a1a2e; }
+.log-entry.dramatic { color: var(--gold); font-weight: 700; }
+.log-entry.sold-log { color: var(--green); font-weight: 700; }
+.log-entry.unsold-log { color: var(--red); }
+.log-entry .log-time { color: var(--text-dim); font-size: 11px; margin-right: 6px; }
+
+/* Squad Panel */
+.auction-squad-panel { display: flex; flex-direction: column; overflow: hidden; }
+.squad-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.squad-tab {
+  padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 700;
+  cursor: pointer; background: var(--card2); border: 1px solid transparent; transition: all 0.2s;
+}
+.squad-tab.active { border-color: var(--gold); background: #2a2a3e; }
+.squad-content {
+  flex: 1; background: var(--card); border-radius: 12px; padding: 12px;
+  overflow-y: auto; font-size: 13px;
+}
+.squad-player-row { display: flex; justify-content: space-between; padding: 4px 6px; border-bottom: 1px solid #1a1a2e; }
+.squad-player-row.overseas { border-left: 3px solid var(--blue); padding-left: 6px; }
+.squad-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.summary-item { background: var(--card2); padding: 6px; border-radius: 6px; text-align: center; }
+.summary-val { font-weight: 700; color: var(--gold); }
+
+/* Teams Budget Bar */
+.teams-budget-bar { display: flex; gap: 8px; padding: 12px; background: var(--card); border-radius: 10px; margin-top: 12px; overflow-x: auto; }
+.team-budget-chip {
+  flex-shrink: 0; padding: 8px 14px; border-radius: 8px; text-align: center;
+  font-size: 12px; font-weight: 700; min-width: 100px;
+  border: 2px solid transparent; transition: all 0.3s;
+}
+.team-budget-chip .chip-name { font-size: 11px; opacity: 0.8; }
+.team-budget-chip .chip-budget { font-size: 16px; font-family: monospace; }
+.team-budget-chip .chip-slots { font-size: 10px; opacity: 0.7; }
+
+/* ===== SQUAD REVIEW ===== */
+.section-title { text-align: center; font-size: 28px; color: var(--gold); margin-bottom: 20px; }
+.squad-review-tabs { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px; }
+.review-tab { padding: 8px 20px; border-radius: 8px; cursor: pointer; font-weight: 700; font-size: 14px; background: var(--card); border: 2px solid transparent; }
+.review-tab.active { border-color: var(--gold); }
+.squad-review-content { max-width: 900px; margin: 0 auto 30px; }
+.review-squad-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.review-player-card {
+  background: var(--card); padding: 12px; border-radius: 8px; border-left: 4px solid var(--gold);
+}
+.review-player-card.overseas { border-left-color: var(--blue); }
+.review-player-name { font-weight: 700; font-size: 14px; }
+.review-player-role { font-size: 12px; color: var(--text-dim); }
+.review-player-price { font-size: 13px; color: var(--gold); font-weight: 700; }
+.review-squad-summary { display: flex; gap: 12px; justify-content: center; margin-bottom: 16px; flex-wrap: wrap; }
+.review-summary-chip { background: var(--card2); padding: 6px 14px; border-radius: 8px; font-size: 13px; }
+
+/* ===== TOURNAMENT ===== */
+.tournament-layout { display: grid; grid-template-columns: 350px 1fr; gap: 20px; }
+.points-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.points-table th { background: var(--card2); padding: 8px; text-align: left; color: var(--gold); font-size: 12px; }
+.points-table td { padding: 8px; border-bottom: 1px solid #1a1a2e; }
+.points-table tr:nth-child(-n+4) td { border-left: 3px solid var(--green); }
+.points-table .team-cell { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+.team-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+.match-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.match-header h3 { color: var(--gold); }
+#match-counter { color: var(--text-dim); font-size: 14px; }
+.match-center { background: var(--card); border-radius: 12px; padding: 20px; min-height: 400px; overflow-y: auto; margin-bottom: 16px; }
+.sim-controls { display: flex; gap: 10px; justify-content: center; }
+
+.match-result-card { margin-bottom: 20px; }
+.match-teams-row { display: flex; justify-content: space-between; align-items: center; font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+.match-vs { color: var(--text-dim); font-size: 14px; }
+.match-score { font-family: monospace; font-size: 18px; }
+.match-winner { color: var(--green); font-weight: 700; font-size: 16px; margin: 8px 0; }
+.match-venue { color: var(--text-dim); font-size: 13px; margin-bottom: 8px; }
+.match-conditions { display: flex; gap: 8px; margin-bottom: 10px; }
+.condition-badge { padding: 3px 10px; border-radius: 12px; font-size: 11px; background: var(--card2); }
+.key-moments { margin-top: 10px; }
+.moment { padding: 4px 0; font-size: 13px; border-bottom: 1px solid #1a1a2e; }
+.moment.highlight { color: var(--gold); font-weight: 600; }
+
+.scorecard-section { margin-top: 12px; }
+.scorecard-section h4 { color: var(--gold); font-size: 14px; margin-bottom: 6px; }
+.scorecard-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 10px; }
+.scorecard-table th { background: var(--card2); padding: 4px 8px; text-align: left; font-size: 11px; }
+.scorecard-table td { padding: 4px 8px; border-bottom: 1px solid #0f0f1a; }
+
+/* Playoffs */
+.playoffs-bracket { margin-top: 30px; text-align: center; }
+.playoffs-bracket h3 { color: var(--gold); margin-bottom: 16px; }
+.bracket-container { display: flex; justify-content: center; gap: 40px; flex-wrap: wrap; }
+.bracket-match { background: var(--card); padding: 16px; border-radius: 10px; min-width: 200px; text-align: center; }
+.bracket-match h4 { color: var(--gold); font-size: 14px; margin-bottom: 8px; }
+.bracket-team { padding: 6px; font-weight: 600; }
+.bracket-team.winner { color: var(--green); }
+
+/* ===== RESULT ===== */
+.result-container { text-align: center; padding-top: 8vh; }
+.result-container h1 { font-size: 48px; color: var(--gold); margin-bottom: 10px; }
+.result-container .champion-name { font-size: 36px; font-weight: 900; margin: 20px 0; }
+.trophy { font-size: 100px; margin: 20px 0; }
+.awards-section { margin: 30px auto; max-width: 600px; }
+.award-item { display: flex; justify-content: space-between; padding: 10px 16px; background: var(--card); margin-bottom: 8px; border-radius: 8px; }
+.award-label { color: var(--text-dim); }
+.award-value { font-weight: 700; color: var(--gold); }
+
+/* ===== RESPONSIVE — TABLET ===== */
+@media (max-width: 1100px) {
+  .auction-main { grid-template-columns: 240px 1fr 260px; }
+}
+
+@media (max-width: 900px) {
+  .auction-main { grid-template-columns: 1fr; height: auto; overflow: visible; }
+  .auction-player-panel { order: 1; }
+  .auction-bid-panel { order: 2; }
+  .auction-squad-panel { order: 3; max-height: 300px; }
+  .tournament-layout { grid-template-columns: 1fr; }
+  .team-grid { grid-template-columns: repeat(2, 1fr); }
+  .home-info { flex-direction: column; align-items: center; }
+}
+
+/* ===== RESPONSIVE — MOBILE ===== */
+@media (max-width: 600px) {
+  body { font-size: 14px; }
+  .screen { padding: 10px; min-height: 100vh; }
+
+  /* Home */
+  .title-glow { font-size: 28px; letter-spacing: 2px; }
+  .subtitle { font-size: 16px; margin-bottom: 24px; }
+  .ipl-logo { font-size: 50px; margin-bottom: 12px; }
+  .home-info { gap: 12px; margin-bottom: 30px; }
+  .info-card { padding: 12px 18px; }
+  .info-num { font-size: 20px; }
+  .btn-large { padding: 14px 32px; font-size: 16px; }
+
+  /* Team Select */
+  .team-select-container h2 { font-size: 22px; }
+  .screen-desc { font-size: 12px; }
+  .team-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .team-select-card { padding: 12px 8px; }
+  .team-select-card .team-emoji { font-size: 28px; }
+  .team-select-card .team-name { font-size: 12px; }
+  .team-select-card .team-city { font-size: 10px; }
+  .human-chip { padding: 6px 10px; }
+  .human-chip input { width: 90px; font-size: 12px; }
+
+  /* Auction Header */
+  .auction-header {
+    flex-wrap: wrap; gap: 8px; padding: 8px 12px;
+  }
+  .auction-title { font-size: 14px; letter-spacing: 1px; }
+  .auction-progress { font-size: 11px; }
+  .btn-pause { padding: 6px 12px; font-size: 11px; }
+
+  /* Auction Main — single column stack */
+  .auction-main {
+    grid-template-columns: 1fr;
+    height: auto; overflow: visible;
+    gap: 10px;
+  }
+
+  /* Player Card — compact horizontal layout */
+  .auction-player-panel { order: 1; }
+  .player-card {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 4px; padding: 12px; text-align: left;
+  }
+  .player-card h2 { font-size: 18px; grid-column: 1 / -1; text-align: center; }
+  .player-flag { font-size: 11px; grid-column: 1 / -1; text-align: center; }
+  .player-meta { grid-column: 1 / -1; justify-content: center; font-size: 11px; gap: 4px; }
+  .player-stats-grid { grid-template-columns: repeat(3, 1fr); gap: 4px; grid-column: 1 / -1; }
+  .stat-item { padding: 4px; font-size: 11px; }
+  .player-history { grid-column: 1 / -1; font-size: 11px; text-align: center; }
+  .base-price { grid-column: 1 / -1; font-size: 16px; text-align: center; margin-top: 4px; }
+
+  /* Bid Panel — compact */
+  .auction-bid-panel { order: 2; }
+  .current-bid-display { padding: 14px; margin-bottom: 8px; }
+  .bid-label { font-size: 11px; letter-spacing: 1px; }
+  .bid-amount { font-size: 36px; }
+  .bid-team { font-size: 15px; }
+  .bid-timer-container { margin-bottom: 8px; }
+
+  .bid-controls { padding: 10px; margin-bottom: 8px; }
+  .active-bidder-label { font-size: 13px; margin-bottom: 6px; }
+  .btn-bid { font-size: 16px; padding: 10px 24px; min-width: 140px; }
+  .btn-pass { padding: 10px 20px; font-size: 14px; }
+  .bid-helper { font-size: 11px; }
+
+  .sold-text { font-size: 42px; }
+
+  /* Auction Log — shorter on mobile */
+  .auction-log { max-height: 150px; min-height: 60px; padding: 8px; font-size: 12px; line-height: 1.4; }
+  .log-entry { padding: 3px 0; }
+  .log-entry .log-time { font-size: 10px; }
+
+  /* Squad Panel — collapsible feel */
+  .auction-squad-panel { order: 3; max-height: 250px; }
+  .squad-tabs { gap: 3px; }
+  .squad-tab { padding: 3px 7px; font-size: 10px; }
+  .squad-content { padding: 8px; font-size: 12px; }
+  .squad-summary { grid-template-columns: 1fr 1fr; gap: 4px; }
+  .summary-item { padding: 4px; font-size: 11px; }
+  .squad-player-row { font-size: 12px; padding: 3px 4px; }
+
+  /* Teams Budget Bar — horizontal scroll */
+  .teams-budget-bar {
+    padding: 8px; gap: 6px; margin-top: 8px;
+    overflow-x: auto; -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap;
+  }
+  .team-budget-chip { min-width: 85px; padding: 6px 8px; font-size: 11px; }
+  .team-budget-chip .chip-name { font-size: 10px; }
+  .team-budget-chip .chip-budget { font-size: 13px; }
+  .team-budget-chip .chip-slots { font-size: 9px; }
+
+  /* Squad Review */
+  .section-title { font-size: 22px; }
+  .squad-review-tabs { gap: 4px; }
+  .review-tab { padding: 6px 12px; font-size: 12px; }
+  .review-squad-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .review-player-card { padding: 8px; }
+  .review-player-name { font-size: 13px; }
+  .review-player-role { font-size: 11px; }
+  .review-player-price { font-size: 12px; }
+  .review-squad-summary { gap: 6px; }
+  .review-summary-chip { padding: 4px 10px; font-size: 11px; }
+
+  /* Tournament */
+  .tournament-layout { grid-template-columns: 1fr; gap: 12px; }
+  .points-table { font-size: 12px; }
+  .points-table th { padding: 5px 4px; font-size: 10px; }
+  .points-table td { padding: 5px 4px; }
+  .team-cell { gap: 4px; font-size: 12px; }
+  .team-dot { width: 8px; height: 8px; }
+  .match-center { padding: 12px; min-height: 250px; }
+  .match-teams-row { font-size: 16px; }
+  .match-score { font-size: 14px; }
+  .match-winner { font-size: 14px; }
+  .match-venue { font-size: 11px; }
+  .match-conditions { flex-wrap: wrap; gap: 4px; }
+  .condition-badge { font-size: 10px; padding: 2px 6px; }
+  .sim-controls { flex-wrap: wrap; gap: 6px; }
+  .sim-controls .btn { padding: 8px 16px; font-size: 13px; }
+  .scorecard-table { font-size: 10px; }
+  .scorecard-table th { padding: 3px 4px; font-size: 9px; }
+  .scorecard-table td { padding: 3px 4px; }
+
+  /* Playoffs */
+  .bracket-container { gap: 12px; }
+  .bracket-match { min-width: 150px; padding: 10px; }
+  .bracket-match h4 { font-size: 12px; }
+  .bracket-team { font-size: 13px; }
+
+  /* Result */
+  .result-container { padding-top: 4vh; }
+  .result-container h1 { font-size: 28px; }
+  .result-container .champion-name { font-size: 24px; }
+  .trophy { font-size: 60px; margin: 12px 0; }
+  .awards-section { margin: 20px auto; }
+  .award-item { padding: 8px 10px; font-size: 13px; }
+  .award-label { font-size: 12px; }
+
+  /* Pause overlay */
+  .pause-overlay .pause-text { font-size: 32px; }
+  .pause-overlay .pause-sub { font-size: 14px; }
+}
+
+/* ===== VERY SMALL PHONES ===== */
+@media (max-width: 380px) {
+  .title-glow { font-size: 22px; }
+  .team-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+  .team-select-card { padding: 8px 4px; }
+  .team-select-card .team-emoji { font-size: 22px; }
+  .team-select-card .team-name { font-size: 10px; }
+  .bid-amount { font-size: 28px; }
+  .btn-bid { font-size: 14px; padding: 8px 16px; min-width: 110px; }
+  .btn-pass { padding: 8px 14px; font-size: 12px; }
+  .player-card h2 { font-size: 15px; }
+  .player-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .review-squad-grid { grid-template-columns: 1fr; }
+  .points-table { font-size: 11px; }
+  .match-teams-row { font-size: 14px; flex-direction: column; gap: 4px; text-align: center; }
+}
