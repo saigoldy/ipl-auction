@@ -193,8 +193,12 @@ window.App = (function() {
     // Hide sold overlay
     document.getElementById('sold-overlay').classList.remove('show');
 
-    // Show bid controls immediately — always visible during bidding
-    showBidControlsForAllHumans();
+    // Show bid controls — for online non-host, use simplified version
+    if (window.onlineMode && window.myOnlineTeamId) {
+      // Don't show yet — wait for human_turn broadcast from host
+    } else {
+      showBidControlsForAllHumans();
+    }
 
     // Re-animate player card
     const card = document.getElementById('player-card');
@@ -246,7 +250,38 @@ window.App = (function() {
   function onHumanTurn(humanTeamIds) {
     activeHumanTeams = humanTeamIds;
     currentHumanIdx = 0;
-    showBidControlsForAllHumans();
+
+    // In online client mode, show controls directly (engine state is empty)
+    if (window.onlineMode && window.myOnlineTeamId) {
+      showOnlineBidControls();
+    } else {
+      showBidControlsForAllHumans();
+    }
+  }
+
+  // Simplified bid controls for online non-host — doesn't depend on engine state
+  function showOnlineBidControls() {
+    const myTeam = window.myOnlineTeamId;
+    if (!myTeam || !activeHumanTeams.includes(myTeam)) {
+      document.getElementById('bid-controls').classList.add('hidden');
+      return;
+    }
+
+    const controls = document.getElementById('bid-controls');
+    controls.classList.remove('hidden');
+
+    const team = TEAMS.find(t => t.id === myTeam);
+    document.getElementById('active-bidder-label').innerHTML =
+      `<span style="color:${team.colors.primary}">${team.emoji} ${team.shortName} — Your Turn!</span>`;
+
+    const bidBtn = document.getElementById('btn-bid');
+    const bidAmountSpan = document.getElementById('btn-bid-amount');
+    bidAmountSpan.textContent = 'BID';
+    bidBtn.disabled = false;
+    bidBtn.style.display = '';
+    document.getElementById('btn-pass').style.display = '';
+    document.getElementById('btn-pass').disabled = false;
+    document.getElementById('bid-helper').textContent = 'Place your bid or pass';
   }
 
   // Always-visible bid controls — shows buttons for all active human teams
