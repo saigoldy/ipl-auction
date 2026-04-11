@@ -97,8 +97,8 @@
       <div id="room-error" class="auth-error" style="margin-bottom:8px"></div>
       <div class="room-bottom-actions">
         <button class="btn btn-primary btn-large" id="btn-room-start" onclick="handleRoomStart()" style="display:none">Start Auction</button>
-        <button class="btn btn-secondary" id="btn-room-ready" onclick="(async()=>{try{await Lobby.toggleReady();location.reload();}catch(e){alert(e.message);}})()">READY</button>
-        <button class="btn btn-secondary" onclick="(async()=>{try{await Lobby.leaveRoom();location.reload();}catch(e){alert(e.message);}})()" style="background:#333">Leave Room</button>
+        <button class="btn btn-secondary" id="btn-room-ready" onclick="(async()=>{try{await Lobby.toggleReady();await refreshRoomPlayers();}catch(e){alert(e.message);}})()">READY</button>
+        <button class="btn btn-secondary" onclick="(async()=>{try{await Lobby.leaveRoom();App.showScreen('lobby');loadActiveRooms();}catch(e){alert(e.message);}})()" style="background:#333">Leave Room</button>
       </div>
     </div>
   </section>
@@ -399,15 +399,17 @@
 
     async function refreshRoomPlayers() {
       const players = await Lobby.getRoomPlayers();
-      // Update team badges
+      // Update team badges — show player name + (You) marker to avoid confusion
+      const myId = Auth.getUser()?.id;
       TEAMS.forEach(t => {
         const badge = document.getElementById('room-team-owner-' + t.id);
         if (!badge) return;
         const owner = players.find(p => p.team_id === t.id);
         if (owner) {
+          const isMe = owner.user_id === myId;
           badge.style.background = t.colors.primary;
           badge.style.color = '#fff';
-          badge.textContent = '🎮 ' + owner.display_name;
+          badge.textContent = '🎮 ' + owner.display_name + (isMe ? ' (You)' : '');
         } else {
           badge.style.background = '#333';
           badge.style.color = '#aaa';
@@ -415,16 +417,20 @@
         }
       });
 
-      // Player list
+      // Player list — use team + name to differentiate same-name players
       const list = document.getElementById('room-players-list');
+      const currentUserId = Auth.getUser()?.id;
       list.innerHTML = '<h4 style="margin:12px 0 8px">Players in Room:</h4>' +
         players.map(p => {
           const team = TEAMS.find(t => t.id === p.team_id);
-          return `<div class="human-chip" style="border-color:${team ? team.colors.primary : '#444'}">
-            <span>${team ? team.emoji : '❓'}</span>
-            <span>${p.display_name}</span>
-            <span style="color:${p.is_ready ? 'var(--green)' : 'var(--red)'}">${p.is_ready ? '✓ Ready' : '...'}</span>
-            ${p.user_id === Lobby.getRoom()?.host_id ? '<span style="color:var(--gold)">👑</span>' : ''}
+          const teamLabel = team ? `<span style="color:${team.colors.primary};font-weight:bold">${team.emoji} ${team.shortName}</span>` : '<span style="color:#888">No team</span>';
+          const isMe = p.user_id === currentUserId;
+          const isHost = p.user_id === Lobby.getRoom()?.host_id;
+          return `<div class="human-chip" style="border-color:${team ? team.colors.primary : '#444'}${isMe ? ';background:rgba(255,255,255,0.05)' : ''}">
+            ${teamLabel}
+            <span>${p.display_name}${isMe ? ' (You)' : ''}</span>
+            <span style="color:${p.is_ready ? 'var(--green)' : 'var(--red)'}">${p.is_ready ? '✓ Ready' : 'Not Ready'}</span>
+            ${isHost ? '<span style="color:var(--gold)">👑 Host</span>' : ''}
           </div>`;
         }).join('');
 
