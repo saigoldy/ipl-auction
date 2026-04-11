@@ -139,13 +139,11 @@ window.App = (function() {
     renderSquadTabs();
     showScreen('auction');
 
-    // Debug: show which teams are human vs AI
-    if (window.onlineMode) {
-      const states = AuctionEngine.getAllTeamStates();
-      const humanList = TEAMS.filter(t => states[t.id]?.isHuman).map(t => t.shortName);
-      const aiList = TEAMS.filter(t => !states[t.id]?.isHuman).map(t => t.shortName);
-      console.log('HUMAN teams:', humanList.join(', '), '| AI teams:', aiList.join(', '));
-    }
+    // Log which teams are human vs AI
+    const states = AuctionEngine.getAllTeamStates();
+    const humanList = TEAMS.filter(t => states[t.id]?.isHuman).map(t => t.shortName);
+    const aiList = TEAMS.filter(t => !states[t.id]?.isHuman).map(t => t.shortName);
+    console.log('HUMAN teams:', humanList.join(', '), '| AI teams:', aiList.join(', '));
 
     // Start auction — only if this client runs the engine (not for online non-host)
     if (!clientOnly) {

@@ -351,12 +351,12 @@
     async function handleRoomStart() {
       const errEl = document.getElementById('room-error');
       try {
-        // Update room status in DB (don't broadcast auction_start yet)
+        // Update room status in DB
         const sb = window.supabaseClient;
         const room = Lobby.getRoom();
         if (room) await sb.from('rooms').update({ status: 'auction' }).eq('id', room.id);
 
-        // Start auction — this sends auction_start_data THEN auction_start
+        // Start auction on host (this also broadcasts to non-hosts)
         await startOnlineAuction();
       } catch (e) {
         if (errEl) { errEl.textContent = 'Start error: ' + e.message; errEl.style.color = 'var(--red)'; }
@@ -405,6 +405,7 @@
 
     async function refreshRoomPlayers() {
       const players = await Lobby.getRoomPlayers();
+      cachedRoomPlayers = players || [];
       // Update team badges — show player name + (You) marker to avoid confusion
       const myId = Auth.getUser()?.id;
       TEAMS.forEach(t => {
@@ -484,31 +485,28 @@
     // ===== ONLINE MULTIPLAYER =====
     window.onlineMode = false;
     let onlineHumanTeams = {};
-
-    // Wire room-phase callbacks (team picks, ready, auction start)
-    let pendingHumanTeams = null;
+    let cachedRoomPlayers = []; // cached from last refreshRoomPlayers call
 
     function wireRoomCallbacks() {
       Lobby.callbacks.onTeamPicked = () => { refreshRoomPlayers(); };
       Lobby.callbacks.onReadyChanged = () => { refreshRoomPlayers(); };
       Lobby.callbacks.onPresenceSync = () => { refreshRoomPlayers(); };
 
-      // Non-host: receive humanTeams data from host BEFORE auction starts
-      Lobby.callbacks.onAuctionStartData = (payload) => {
-        if (payload && payload.humanTeams) {
-          pendingHumanTeams = payload.humanTeams;
-          console.log('Received human teams from host:', JSON.stringify(pendingHumanTeams));
-        }
-      };
-
-      // Non-host receives auction_start from host
-      Lobby.callbacks.onAuctionStart = () => {
+      // Non-host receives auction_start with humanTeams included
+      Lobby.callbacks.onAuctionStart = (payload) => {
         if (!Lobby.isHost()) {
-          // Use the humanTeams that host broadcasted
-          startOnlineAuction(pendingHumanTeams);
-          pendingHumanTeams = null;
+          const ht = (payload && payload.humanTeams) ? payload.humanTeams : null;
+          startOnlineAuction(ht);
         }
       };
+    }
+
+    function buildHumanTeamsFromPlayers(players) {
+      const ht = {};
+      (players || []).forEach(p => {
+        if (p.team_id) ht[p.team_id] = p.display_name;
+      });
+      return ht;
     }
 
     async function startOnlineAuction(broadcastedHumanTeams) {
@@ -516,46 +514,32 @@
       window.onlineMode = true;
       AuctionEngine.setOnlineTimer(true);
 
+      // Build humanTeams — use cached room players as primary source
+      // This avoids async race conditions
+      let players = cachedRoomPlayers;
+      if (!players || players.length === 0) {
+        players = await Lobby.getRoomPlayers();
+      }
+
+      const myTeamId = players.find(p => p.user_id === currentUser?.id)?.team_id || null;
+
       if (Lobby.isHost()) {
-        // HOST: build humanTeams from room players — this is the source of truth
-        const players = await Lobby.getRoomPlayers();
-        const myTeamId = players.find(p => p.user_id === currentUser?.id)?.team_id || null;
+        onlineHumanTeams = buildHumanTeamsFromPlayers(players);
 
-        onlineHumanTeams = {};
-        players.forEach(p => {
-          if (p.team_id) onlineHumanTeams[p.team_id] = p.display_name;
-        });
+        alert('Starting auction!\nHUMAN teams: ' + Object.keys(onlineHumanTeams).join(', ') +
+              '\nAI teams: ' + TEAMS.filter(t => !onlineHumanTeams[t.id]).map(t => t.shortName).join(', '));
 
-        console.log('HOST starting auction. Human teams:', JSON.stringify(onlineHumanTeams));
+        // Broadcast humanTeams WITH the auction_start event (single broadcast, no race)
+        Lobby.broadcastGameState('auction_start', { humanTeams: onlineHumanTeams });
 
-        // 1. Broadcast humanTeams FIRST so non-hosts have it ready
-        Lobby.broadcastGameState('auction_start_data', { humanTeams: onlineHumanTeams });
-
-        // 2. Small delay then broadcast auction_start so non-hosts process in order
-        setTimeout(() => {
-          Lobby.broadcastGameState('auction_start', {});
-        }, 300);
-
-        // 3. Start engine on host
         App.startAuctionWithTeams(onlineHumanTeams, myTeamId, false);
         wireHostBroadcasts();
       } else {
-        // NON-HOST: use the host's humanTeams mapping (from broadcast) to avoid mismatch
-        if (broadcastedHumanTeams) {
-          onlineHumanTeams = broadcastedHumanTeams;
-        } else {
-          // Fallback: build from room players
-          const players = await Lobby.getRoomPlayers();
-          onlineHumanTeams = {};
-          players.forEach(p => {
-            if (p.team_id) onlineHumanTeams[p.team_id] = p.display_name;
-          });
-        }
+        // NON-HOST: use host's humanTeams if available, otherwise build from cache
+        onlineHumanTeams = broadcastedHumanTeams || buildHumanTeamsFromPlayers(players);
 
-        const players = await Lobby.getRoomPlayers();
-        const myTeamId = players.find(p => p.user_id === currentUser?.id)?.team_id || null;
-
-        console.log('CLIENT starting auction. Human teams:', JSON.stringify(onlineHumanTeams), 'My team:', myTeamId);
+        alert('Joining auction!\nHUMAN teams: ' + Object.keys(onlineHumanTeams).join(', ') +
+              '\nYour team: ' + myTeamId);
 
         App.startAuctionWithTeams(onlineHumanTeams, myTeamId, true);
         wireClientListeners();

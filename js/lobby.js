@@ -221,12 +221,8 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onReadyChanged) Lobby.callbacks.onReadyChanged(payload);
     });
 
-    realtimeChannel.on('broadcast', { event: 'auction_start_data' }, ({ payload }) => {
-      if (Lobby.callbacks.onAuctionStartData) Lobby.callbacks.onAuctionStartData(payload);
-    });
-
-    realtimeChannel.on('broadcast', { event: 'auction_start' }, () => {
-      if (Lobby.callbacks.onAuctionStart) Lobby.callbacks.onAuctionStart();
+    realtimeChannel.on('broadcast', { event: 'auction_start' }, ({ payload }) => {
+      if (Lobby.callbacks.onAuctionStart) Lobby.callbacks.onAuctionStart(payload);
     });
 
     // Player action events (player → host)
