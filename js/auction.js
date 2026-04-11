@@ -308,7 +308,7 @@ window.AuctionEngine = (function() {
     if (!canAfford(teamId, newBid)) return;
     if (!canBuyPlayer(teamId, state.currentPlayer)) return;
 
-    placeBidInternal(teamId, newBid, false);
+    placeBidInternal(teamId, newBid, false, true); // fromHuman=true
     // Reset countdown — new bid came in
     resetCountdown();
   }
@@ -328,7 +328,12 @@ window.AuctionEngine = (function() {
     // Don't stop the countdown — other teams (AI) may still bid
   }
 
-  function placeBidInternal(teamId, amount, isBluff) {
+  function placeBidInternal(teamId, amount, isBluff, fromHuman) {
+    // SAFETY: block AI from ever bidding for human-controlled teams
+    if (!fromHuman && state.teamStates[teamId].isHuman) {
+      console.error('BLOCKED: AI tried to bid for human team', teamId);
+      return;
+    }
     state.currentBid = amount;
     state.currentBidder = teamId;
     state.bidHistory.push({ teamId, amount, time: Date.now() });
@@ -392,6 +397,7 @@ window.AuctionEngine = (function() {
     const ts = state.teamStates[team.id];
 
     // Hard blocks
+    if (ts.isHuman) return { willBid: false }; // NEVER auto-evaluate for human teams
     if (ts.filled >= 25) return { willBid: false };
     if (player.isOverseas && ts.overseasCount >= 8) return { willBid: false };
     if (!canAfford(team.id, bidAmount)) return { willBid: false };

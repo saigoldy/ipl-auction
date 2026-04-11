@@ -605,11 +605,13 @@
 
       // Receive remote bids/passes from non-host players
       Lobby.callbacks.onBid = (payload) => {
+        console.log('HOST received bid from remote player:', payload);
         if (payload.teamId && payload.userId !== Auth.getUser().id) {
           AuctionEngine.humanBid(payload.teamId);
         }
       };
       Lobby.callbacks.onPass = (payload) => {
+        console.log('HOST received pass from remote player:', payload);
         if (payload.teamId && payload.userId !== Auth.getUser().id) {
           AuctionEngine.humanPass(payload.teamId);
         }
