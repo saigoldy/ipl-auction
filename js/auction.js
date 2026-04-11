@@ -380,13 +380,9 @@ window.AuctionEngine = (function() {
 
   function canAfford(teamId, bidAmount) {
     const ts = state.teamStates[teamId];
-    // Human players can bid as long as they have budget (full freedom)
-    if (ts.isHuman) {
-      return ts.budget >= bidAmount;
-    }
-    // AI teams must reserve budget for remaining mandatory slots
+    // ALL teams (human + AI) must reserve budget for remaining mandatory slots
     const slotsNeeded = Math.max(0, 18 - ts.filled - 1);
-    const reserveNeeded = slotsNeeded * 30;
+    const reserveNeeded = slotsNeeded * 20; // 20L minimum per remaining slot
     return ts.budget - bidAmount >= reserveNeeded;
   }
 
