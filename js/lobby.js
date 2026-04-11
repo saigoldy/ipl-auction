@@ -40,7 +40,8 @@ window.Lobby = (function() {
     // Find room
     const { data: room, error: roomErr } = await sb.from('rooms').select('*').eq('code', code.toUpperCase()).single();
     if (roomErr || !room) throw new Error('Room not found');
-    if (room.status !== 'waiting' && room.status !== 'picking_teams') throw new Error('Room already in progress');
+    if (room.status === 'finished') throw new Error('Room has ended');
+    // Allow rejoining in-progress rooms (for reconnection)
 
     // Check if already in room
     const { data: existing } = await sb.from('room_players').select('*').eq('room_id', room.id).eq('user_id', user.id).single();
@@ -322,18 +323,18 @@ window.Lobby = (function() {
 
       if (e1 || !myEntries || myEntries.length === 0) return null;
 
-      // Try each room to find an active one
+      // Try each room to find an active one (including in-progress auctions)
       for (const entry of myEntries) {
         const { data: room, error: e2 } = await sb.from('rooms')
           .select('*')
           .eq('id', entry.room_id)
-          .in('status', ['waiting', 'picking_teams'])
+          .in('status', ['waiting', 'picking_teams', 'auction', 'simulation'])
           .single();
 
         if (room && !e2) {
           currentRoom = room;
           subscribeToRoom(room.id);
-          console.log('Auto-rejoined room:', room.code);
+          console.log('Auto-rejoined room:', room.code, 'status:', room.status);
           return room;
         }
       }

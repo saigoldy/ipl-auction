@@ -650,11 +650,27 @@
             Auth.showApp();
             document.getElementById('btn-play-online').style.display = '';
 
-            // Auto-rejoin room if user was in one (handles page refresh)
+            // Auto-rejoin room if user was in one (handles page refresh/disconnect)
             try {
               const room = await Lobby.rejoinIfInRoom();
               if (room) {
-                showRoomScreen(room);
+                if (room.status === 'auction') {
+                  // Rejoin in-progress auction as non-host client
+                  console.log('Rejoining in-progress auction...');
+                  const players = await Lobby.getRoomPlayers();
+                  cachedRoomPlayers = players || [];
+                  const myTeamId = players.find(p => p.user_id === user.id)?.team_id || null;
+                  const ht = buildHumanTeamsFromPlayers(players);
+
+                  window.onlineMode = true;
+                  AuctionEngine.setOnlineTimer(true);
+                  App.startAuctionWithTeams(ht, myTeamId, true);
+                  wireRoomCallbacks();
+                  wireClientListeners();
+                } else {
+                  // Room is in waiting/picking_teams — show room screen
+                  showRoomScreen(room);
+                }
               }
             } catch (rejoinErr) {
               console.error('Room rejoin failed:', rejoinErr);
