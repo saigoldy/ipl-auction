@@ -676,6 +676,23 @@ window.AuctionEngine = (function() {
     const team = TEAMS.find(t => t.id === teamId);
     const ts = state.teamStates[teamId];
 
+    // Prevent duplicate player in squad
+    if (ts.squad.some(s => s.player.id === player.id)) {
+      state.currentIndex++;
+      setTimeout(() => nextPlayer(), 500);
+      return;
+    }
+
+    // Also check if player is already in ANY other team
+    const alreadySold = Object.values(state.teamStates).some(t =>
+      t.squad.some(s => s.player.id === player.id)
+    );
+    if (alreadySold) {
+      state.currentIndex++;
+      setTimeout(() => nextPlayer(), 500);
+      return;
+    }
+
     // Update team state
     ts.budget -= price;
     ts.squad.push({ player, price });
@@ -896,8 +913,11 @@ window.AuctionEngine = (function() {
         if (!anyBid) biddingActive = false;
       }
 
-      // Resolve: sold or unsold
-      if (state.currentBidder) {
+      // Resolve: sold or unsold (with duplicate check)
+      const alreadyInSquad = Object.values(state.teamStates).some(t =>
+        t.squad.some(s => s.player.id === player.id)
+      );
+      if (state.currentBidder && !alreadyInSquad) {
         const teamId = state.currentBidder;
         const price = state.currentBid;
         const ts = state.teamStates[teamId];
@@ -911,7 +931,7 @@ window.AuctionEngine = (function() {
           ts.overseasByRole[player.role] = (ts.overseasByRole[player.role] || 0) + 1;
         }
         state.soldPlayers.push({ player, teamId, price });
-      } else {
+      } else if (!state.currentBidder) {
         state.unsoldPlayers.push(player);
       }
 
