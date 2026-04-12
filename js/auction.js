@@ -676,6 +676,14 @@ window.AuctionEngine = (function() {
     const team = TEAMS.find(t => t.id === teamId);
     const ts = state.teamStates[teamId];
 
+    // Hard rule: never exceed 8 overseas — mark unsold instead
+    if (player.isOverseas && ts.overseasCount >= 8) {
+      state.unsoldPlayers.push(player);
+      state.currentIndex++;
+      setTimeout(() => nextPlayer(), 500);
+      return;
+    }
+
     // Prevent duplicate player in squad
     if (ts.squad.some(s => s.player.id === player.id)) {
       state.currentIndex++;
@@ -796,14 +804,7 @@ window.AuctionEngine = (function() {
           }
         }
 
-        if (bestIdx === -1) {
-          // If only overseas remain and we're at 8, allow going over overseas limit as last resort
-          for (let i = 0; i < state.unsoldPlayers.length; i++) {
-            bestIdx = i;
-            break;
-          }
-        }
-
+        // Hard rule: never exceed 8 overseas per squad
         if (bestIdx === -1) break;
 
         const player = state.unsoldPlayers.splice(bestIdx, 1)[0];
@@ -916,11 +917,14 @@ window.AuctionEngine = (function() {
         if (!anyBid) biddingActive = false;
       }
 
-      // Resolve: sold or unsold (with duplicate check)
+      // Resolve: sold or unsold (with duplicate and overseas checks)
       const alreadyInSquad = Object.values(state.teamStates).some(t =>
         t.squad.some(s => s.player.id === player.id)
       );
-      if (state.currentBidder && !alreadyInSquad) {
+      const bidderState = state.currentBidder ? state.teamStates[state.currentBidder] : null;
+      const overseasViolation = bidderState && player.isOverseas && bidderState.overseasCount >= 8;
+
+      if (state.currentBidder && !alreadyInSquad && !overseasViolation) {
         const teamId = state.currentBidder;
         const price = state.currentBid;
         const ts = state.teamStates[teamId];
@@ -934,7 +938,8 @@ window.AuctionEngine = (function() {
           ts.overseasByRole[player.role] = (ts.overseasByRole[player.role] || 0) + 1;
         }
         state.soldPlayers.push({ player, teamId, price });
-      } else if (!state.currentBidder) {
+      } else if (!state.currentBidder || overseasViolation) {
+        // Unsold or blocked by overseas limit
         state.unsoldPlayers.push(player);
       }
 
