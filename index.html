@@ -326,9 +326,19 @@
       if (!name) { errEl.textContent = 'Enter a display name'; return; }
       if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters'; return; }
       try {
-        await Auth.signUp(email, password, name);
-        errEl.style.color = 'var(--green)';
-        errEl.textContent = 'Account created! Check your email to verify, then sign in.';
+        const result = await Auth.signUp(email, password, name);
+        // If signup returns a session, auto-sign-in (email confirmation disabled)
+        if (result && result.session) {
+          // User is automatically signed in
+        } else {
+          // Try sign-in immediately (works if email confirmation is off)
+          try {
+            await Auth.signIn(email, password);
+          } catch (signInErr) {
+            errEl.style.color = 'var(--green)';
+            errEl.textContent = 'Account created! You can now sign in.';
+          }
+        }
       } catch (e) { errEl.textContent = e.message; }
     }
 
