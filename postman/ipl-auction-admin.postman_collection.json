@@ -1,0 +1,183 @@
+{
+  "info": {
+    "name": "IPL Auction Admin",
+    "description": "Admin operations for IPL Auction app — change team budgets, inspect rooms, manage state",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "supabase_url",
+      "value": "https://wlhbegfxeyaszzlmztjl.supabase.co",
+      "type": "string"
+    },
+    {
+      "key": "anon_key",
+      "value": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndsaGJlZ2Z4ZXlhc3p6bG16dGpsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU5MDUxMDYsImV4cCI6MjA5MTQ4MTEwNn0.MIlLaO9nlWNF_K6bOUH6Ji-OUo4VdqJ4dIebVBOEHq8",
+      "type": "string"
+    },
+    {
+      "key": "room_code",
+      "value": "4JUGVT",
+      "type": "string",
+      "description": "The 6-character room code"
+    },
+    {
+      "key": "new_budget_lakhs",
+      "value": "15000",
+      "type": "string",
+      "description": "New budget in lakhs (e.g. 12500 = ₹125 Cr, 15000 = ₹150 Cr)"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. List all rooms",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Authorization", "value": "Bearer {{anon_key}}" }
+        ],
+        "url": {
+          "raw": "{{supabase_url}}/rest/v1/rooms?select=id,code,name,status,settings,created_at&order=created_at.desc",
+          "host": ["{{supabase_url}}"],
+          "path": ["rest", "v1", "rooms"],
+          "query": [
+            { "key": "select", "value": "id,code,name,status,settings,created_at" },
+            { "key": "order", "value": "created_at.desc" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "2. Get room by code",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Authorization", "value": "Bearer {{anon_key}}" }
+        ],
+        "url": {
+          "raw": "{{supabase_url}}/rest/v1/rooms?code=eq.{{room_code}}&select=*",
+          "host": ["{{supabase_url}}"],
+          "path": ["rest", "v1", "rooms"],
+          "query": [
+            { "key": "code", "value": "eq.{{room_code}}" },
+            { "key": "select", "value": "*" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "3. Change room budget (default for new auctions)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Budget updated', () => {",
+              "  pm.response.to.have.status(204);",
+              "  console.log('Budget changed to ₹' + (pm.variables.get('new_budget_lakhs')/100) + ' Cr for room ' + pm.variables.get('room_code'));",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Prefer", "value": "return=minimal" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"settings\": {\n    \"budget\": {{new_budget_lakhs}},\n    \"min_players\": 18,\n    \"max_players_per_team\": 25,\n    \"timer_seconds\": 5\n  }\n}"
+        },
+        "url": {
+          "raw": "{{supabase_url}}/rest/v1/rooms?code=eq.{{room_code}}",
+          "host": ["{{supabase_url}}"],
+          "path": ["rest", "v1", "rooms"],
+          "query": [
+            { "key": "code", "value": "eq.{{room_code}}" }
+          ]
+        },
+        "description": "Sets the default budget for an unstarted room. Budget is in LAKHS (not crores). Examples:\n- 12500 = ₹125 Cr (default)\n- 15000 = ₹150 Cr\n- 20000 = ₹200 Cr\n- 10000 = ₹100 Cr\n\nNOTE: Only affects rooms in 'waiting' or 'picking_teams' status. Once auction starts, team budgets are in the host's browser memory and cannot be changed via the API."
+      }
+    },
+    {
+      "name": "4. List players in a room",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Authorization", "value": "Bearer {{anon_key}}" }
+        ],
+        "url": {
+          "raw": "{{supabase_url}}/rest/v1/room_players?select=*,rooms(code,name)&rooms.code=eq.{{room_code}}",
+          "host": ["{{supabase_url}}"],
+          "path": ["rest", "v1", "room_players"],
+          "query": [
+            { "key": "select", "value": "*,rooms(code,name)" },
+            { "key": "rooms.code", "value": "eq.{{room_code}}" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "5. Delete finished/stuck room",
+      "request": {
+        "method": "DELETE",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+          { "key": "Prefer", "value": "return=minimal" }
+        ],
+        "url": {
+          "raw": "{{supabase_url}}/rest/v1/rooms?code=eq.{{room_code}}",
+          "host": ["{{supabase_url}}"],
+          "path": ["rest", "v1", "rooms"],
+          "query": [
+            { "key": "code", "value": "eq.{{room_code}}" }
+          ]
+        },
+        "description": "Only the host can delete their room (RLS policy enforced). Requires host's JWT token in Authorization header, not anon key."
+      }
+    },
+    {
+      "name": "6. Reset room to waiting status",
+      "request": {
+        "method": "PATCH",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Prefer", "value": "return=minimal" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"waiting\"\n}"
+        },
+        "url": {
+          "raw": "{{supabase_url}}/rest/v1/rooms?code=eq.{{room_code}}",
+          "host": ["{{supabase_url}}"],
+          "path": ["rest", "v1", "rooms"],
+          "query": [
+            { "key": "code", "value": "eq.{{room_code}}" }
+          ]
+        },
+        "description": "Reset a stuck auction back to waiting status. Requires host privileges."
+      }
+    },
+    {
+      "name": "OFFLINE: Browser Console Script",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "about:blank", "host": ["about:blank"] },
+        "description": "=== OFFLINE MODE (localStorage) ===\n\nPostman cannot access browser localStorage directly. Instead, open the app in your browser, press F12 → Console, and paste ONE of these scripts:\n\n--- A) Change one team's budget ---\n(() => {\n  const save = JSON.parse(localStorage.getItem('ipl_auction_save_v1'));\n  const teamId = 'MI';      // change to target team\n  const newBudget = 20000;  // in lakhs — 20000 = ₹200 Cr\n  if (save && save.teamStates[teamId]) {\n    save.teamStates[teamId].budget = newBudget;\n    localStorage.setItem('ipl_auction_save_v1', JSON.stringify(save));\n    console.log(teamId + ' budget set to ₹' + (newBudget/100) + ' Cr');\n    location.reload();\n  } else {\n    console.error('No save found or team not in save');\n  }\n})();\n\n--- B) Change ALL teams' budgets ---\n(() => {\n  const save = JSON.parse(localStorage.getItem('ipl_auction_save_v1'));\n  const newBudget = 15000;  // in lakhs\n  if (save) {\n    Object.keys(save.teamStates).forEach(tid => {\n      save.teamStates[tid].budget = newBudget;\n    });\n    localStorage.setItem('ipl_auction_save_v1', JSON.stringify(save));\n    console.log('All teams set to ₹' + (newBudget/100) + ' Cr');\n    location.reload();\n  }\n})();\n\n--- C) View current budgets ---\n(() => {\n  const save = JSON.parse(localStorage.getItem('ipl_auction_save_v1'));\n  if (save) {\n    Object.entries(save.teamStates).forEach(([tid, s]) => {\n      console.log(tid + ': ₹' + (s.budget/100).toFixed(2) + ' Cr (' + s.filled + '/25 players)');\n    });\n  } else console.log('No save found');\n})();\n\n--- D) Clear saved game ---\nlocalStorage.removeItem('ipl_auction_save_v1'); location.reload();"
+      }
+    }
+  ]
+}
