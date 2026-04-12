@@ -402,32 +402,84 @@ window.AuctionEngine = (function() {
     if (player.isOverseas && ts.overseasCount >= 8) return { willBid: false };
     if (!canAfford(team.id, bidAmount)) return { willBid: false };
 
-    // ===== Step 1: NEED SCORE (0-100) — Sub-role aware =====
-    let needScore = 0;
     const role = player.role;
     const needs = team.squadNeeds;
     const rc = ts.roleCount;
     const src = ts.subRoleCount;
+    const slotsRemaining = state.playerPool.length - state.currentIndex;
+    const slotsNeeded = Math.max(0, 18 - ts.filled);
+    const isDesperate = slotsNeeded > 0 && slotsRemaining < slotsNeeded * 3;
 
-    // Base role need — higher scores so more teams compete for players
-    if (role === 'batter') {
-      needScore = rc.batter < needs.batters.min ? 65 : (rc.batter < needs.batters.max ? 40 : 12);
-    } else if (role === 'bowler') {
-      needScore = rc.bowler < needs.bowlers.min ? 65 : (rc.bowler < needs.bowlers.max ? 40 : 12);
-    } else if (role === 'allRounder') {
-      needScore = rc.allRounder < needs.allRounders.min ? 70 : (rc.allRounder < needs.allRounders.max ? 45 : 15);
-    } else if (role === 'wicketkeeper') {
-      needScore = rc.wicketkeeper < needs.wicketkeepers.min ? 70 : (rc.wicketkeeper < needs.wicketkeepers.max ? 30 : 5);
+    // ===== SELF-AWARENESS FILTERS — skip players that don't fit =====
+
+    // 1. Role saturation: already have enough of this role? Skip unless desperate
+    if (!isDesperate) {
+      if (role === 'batter' && rc.batter >= needs.batters.max) return { willBid: false };
+      if (role === 'bowler' && rc.bowler >= needs.bowlers.max) return { willBid: false };
+      if (role === 'allRounder' && rc.allRounder >= needs.allRounders.max) return { willBid: false };
+      if (role === 'wicketkeeper' && rc.wicketkeeper >= needs.wicketkeepers.max) return { willBid: false };
     }
 
-    // Star player interest: quality players attract more teams regardless of position need
-    if (player.starPower >= 85) needScore += 20;
-    else if (player.starPower >= 70) needScore += 10;
-    else if (player.starPower >= 55) needScore += 5;
+    // 2. Too expensive for role need: if player costs >20% of budget but need is low, skip
+    const budgetPct = bidAmount / ts.budget;
+    const needLevel = rc[role] < needs[role === 'batter' ? 'batters' : role === 'bowler' ? 'bowlers' : role === 'allRounder' ? 'allRounders' : 'wicketkeepers'].min
+      ? 'high' : rc[role] < needs[role === 'batter' ? 'batters' : role === 'bowler' ? 'bowlers' : role === 'allRounder' ? 'allRounders' : 'wicketkeepers'].max
+      ? 'medium' : 'low';
+    if (!isDesperate && needLevel === 'low' && budgetPct > 0.08) return { willBid: false };
+    if (!isDesperate && needLevel === 'medium' && budgetPct > 0.25) return { willBid: false };
+
+    // 3. Overseas balance: don't stockpile overseas in one role
+    if (player.isOverseas && !isDesperate) {
+      const overseasInRole = ts.overseasByRole[role] || 0;
+      if (overseasInRole >= 2 && rc[role] >= needs[role === 'batter' ? 'batters' : role === 'bowler' ? 'bowlers' : role === 'allRounder' ? 'allRounders' : 'wicketkeepers'].min) {
+        return { willBid: false };
+      }
+      // Don't take 7th overseas unless genuinely needed
+      if (ts.overseasCount >= 7 && needLevel === 'low') return { willBid: false };
+    }
+
+    // 4. Sub-role saturation: don't stockpile one position
+    const subCount = src[player.subRole] || 0;
+    if (!isDesperate) {
+      if (player.subRole === 'top-order' && subCount >= 3) return { willBid: false };
+      if (player.subRole === 'finisher' && subCount >= 2) return { willBid: false };
+      if (player.subRole === 'wk-batter' && subCount >= 2) return { willBid: false };
+      if (player.subRole === 'death-bowler' && subCount >= 3) return { willBid: false };
+      if (player.subRole === 'spin' && subCount >= 3) return { willBid: false };
+    }
+
+    // 5. Play-style mismatch: pace-heavy teams don't want spinners (and vice versa) unless low need
+    const isPaceStyle = ['RF', 'RFM', 'LF', 'LFM'].includes(player.bowlingStyle);
+    const isSpinStyle = ['OB', 'SLA', 'LB', 'CLA'].includes(player.bowlingStyle);
+    if (!isDesperate && needLevel !== 'high') {
+      if (isPaceStyle && team.playStyle.pacePreference < 0.35 && Math.random() > 0.3) return { willBid: false };
+      if (isSpinStyle && team.playStyle.pacePreference > 0.75 && Math.random() > 0.3) return { willBid: false };
+    }
+
+    // ===== Step 1: NEED SCORE (0-100) — Sub-role aware =====
+    let needScore = 0;
+
+    // Base role need
+    if (role === 'batter') {
+      needScore = rc.batter < needs.batters.min ? 65 : (rc.batter < needs.batters.max ? 35 : 8);
+    } else if (role === 'bowler') {
+      needScore = rc.bowler < needs.bowlers.min ? 65 : (rc.bowler < needs.bowlers.max ? 35 : 8);
+    } else if (role === 'allRounder') {
+      needScore = rc.allRounder < needs.allRounders.min ? 70 : (rc.allRounder < needs.allRounders.max ? 40 : 10);
+    } else if (role === 'wicketkeeper') {
+      needScore = rc.wicketkeeper < needs.wicketkeepers.min ? 70 : (rc.wicketkeeper < needs.wicketkeepers.max ? 25 : 3);
+    }
+
+    // Star power bonus ONLY if role is actually needed (not for saturated roles)
+    if (needLevel !== 'low') {
+      if (player.starPower >= 85) needScore += 15;
+      else if (player.starPower >= 70) needScore += 8;
+      else if (player.starPower >= 55) needScore += 3;
+    }
 
     // Sub-role positional need — batting order awareness
     const subRole = player.subRole;
-    const subCount = src[subRole] || 0;
+    // subCount already defined in filter section above
     if (subRole === 'top-order' && subCount < 2) needScore += 20;
     else if (subRole === 'top-order' && subCount < 3) needScore += 8;
     if (subRole === 'finisher' && subCount < 1) needScore += 25;
@@ -452,12 +504,9 @@ window.AuctionEngine = (function() {
 
     needScore = Math.max(0, needScore);
 
-    // Desperation factor — stronger scaling to ensure teams reach 18
-    const slotsRemaining = state.playerPool.length - state.currentIndex;
-    const slotsNeeded = 18 - ts.filled;
+    // Desperation factor — use vars from top (already defined)
     if (slotsNeeded > 0) {
       if (slotsRemaining < slotsNeeded * 2) {
-        // Critical: fewer players left than twice what we need — must buy almost everyone
         needScore += Math.min(80, slotsNeeded * 15);
       } else if (slotsRemaining < slotsNeeded * 3) {
         needScore += Math.min(50, slotsNeeded * 10);
@@ -509,8 +558,7 @@ window.AuctionEngine = (function() {
     if (player.subRole === 'death-bowler' && team.playStyle.deathBowlingValue > 0.7) valueScore += 12;
     if (player.subRole === 'finisher' && team.playStyle.powerHittingValue > 0.7) valueScore += 12;
     if (player.subRole === 'powerplay-bowler' && team.playStyle.pacePreference > 0.6) valueScore += 8;
-    const isPaceStyle = ['RF', 'RFM', 'LF', 'LFM'].includes(player.bowlingStyle);
-    const isSpinStyle = ['OB', 'SLA', 'LB', 'CLA'].includes(player.bowlingStyle);
+    // isPaceStyle/isSpinStyle already defined in filter section
     if (isPaceStyle && team.playStyle.pacePreference > 0.6) valueScore += 6;
     if (isSpinStyle && team.playStyle.pacePreference < 0.4) valueScore += 6;
 
