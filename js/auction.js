@@ -410,50 +410,52 @@ window.AuctionEngine = (function() {
     const slotsNeeded = Math.max(0, 18 - ts.filled);
     const isDesperate = slotsNeeded > 0 && slotsRemaining < slotsNeeded * 3;
 
-    // ===== SELF-AWARENESS FILTERS — skip players that don't fit =====
+    // ===== SELF-AWARENESS FILTERS (probabilistic — keep some chaos) =====
+    // Most filters reduce probability of bidding, not hard block.
+    // This way 3-5 teams still compete on good players, but saturated teams mostly skip.
 
-    // 1. Role saturation: already have enough of this role? Skip unless desperate
-    if (!isDesperate) {
-      if (role === 'batter' && rc.batter >= needs.batters.max) return { willBid: false };
-      if (role === 'bowler' && rc.bowler >= needs.bowlers.max) return { willBid: false };
-      if (role === 'allRounder' && rc.allRounder >= needs.allRounders.max) return { willBid: false };
-      if (role === 'wicketkeeper' && rc.wicketkeeper >= needs.wicketkeepers.max) return { willBid: false };
+    const budgetPct = bidAmount / ts.budget;
+    const roleKey = role === 'batter' ? 'batters' : role === 'bowler' ? 'bowlers' : role === 'allRounder' ? 'allRounders' : 'wicketkeepers';
+    const needLevel = rc[role] < needs[roleKey].min ? 'high'
+      : rc[role] < needs[roleKey].max ? 'medium' : 'low';
+
+    // 1. HARD BLOCK: completely full role (>max) AND low need → skip always
+    if (!isDesperate && needLevel === 'low') {
+      // Full role: 85% chance to skip (still bid 15% for variety)
+      if (Math.random() < 0.85) return { willBid: false };
     }
 
-    // 2. Too expensive for role need: if player costs >20% of budget but need is low, skip
-    const budgetPct = bidAmount / ts.budget;
-    const needLevel = rc[role] < needs[role === 'batter' ? 'batters' : role === 'bowler' ? 'bowlers' : role === 'allRounder' ? 'allRounders' : 'wicketkeepers'].min
-      ? 'high' : rc[role] < needs[role === 'batter' ? 'batters' : role === 'bowler' ? 'bowlers' : role === 'allRounder' ? 'allRounders' : 'wicketkeepers'].max
-      ? 'medium' : 'low';
-    if (!isDesperate && needLevel === 'low' && budgetPct > 0.08) return { willBid: false };
-    if (!isDesperate && needLevel === 'medium' && budgetPct > 0.25) return { willBid: false };
+    // 2. HARD BLOCK: player way too expensive for low-need role
+    if (!isDesperate && needLevel === 'low' && budgetPct > 0.15) return { willBid: false };
+    if (!isDesperate && needLevel === 'medium' && budgetPct > 0.35) return { willBid: false };
 
-    // 3. Overseas balance: don't stockpile overseas in one role
+    // 3. Overseas balance: probabilistic — don't stockpile overseas in one role
     if (player.isOverseas && !isDesperate) {
       const overseasInRole = ts.overseasByRole[role] || 0;
-      if (overseasInRole >= 2 && rc[role] >= needs[role === 'batter' ? 'batters' : role === 'bowler' ? 'bowlers' : role === 'allRounder' ? 'allRounders' : 'wicketkeepers'].min) {
+      if (overseasInRole >= 2 && needLevel !== 'high' && Math.random() < 0.7) {
         return { willBid: false };
       }
-      // Don't take 7th overseas unless genuinely needed
-      if (ts.overseasCount >= 7 && needLevel === 'low') return { willBid: false };
+      // 7th overseas: only bid for high-need
+      if (ts.overseasCount >= 7 && needLevel === 'low' && Math.random() < 0.9) return { willBid: false };
     }
 
-    // 4. Sub-role saturation: don't stockpile one position
+    // 4. Sub-role saturation: probabilistic skips
     const subCount = src[player.subRole] || 0;
     if (!isDesperate) {
-      if (player.subRole === 'top-order' && subCount >= 3) return { willBid: false };
-      if (player.subRole === 'finisher' && subCount >= 2) return { willBid: false };
-      if (player.subRole === 'wk-batter' && subCount >= 2) return { willBid: false };
-      if (player.subRole === 'death-bowler' && subCount >= 3) return { willBid: false };
-      if (player.subRole === 'spin' && subCount >= 3) return { willBid: false };
+      // Oversaturated positions: 70% chance to skip
+      if (player.subRole === 'top-order' && subCount >= 3 && Math.random() < 0.7) return { willBid: false };
+      if (player.subRole === 'finisher' && subCount >= 2 && Math.random() < 0.6) return { willBid: false };
+      if (player.subRole === 'wk-batter' && subCount >= 2 && Math.random() < 0.8) return { willBid: false };
+      if (player.subRole === 'death-bowler' && subCount >= 3 && Math.random() < 0.7) return { willBid: false };
+      if (player.subRole === 'spin' && subCount >= 3 && Math.random() < 0.7) return { willBid: false };
     }
 
-    // 5. Play-style mismatch: pace-heavy teams don't want spinners (and vice versa) unless low need
+    // 5. Play-style mismatch: mild preference, not hard skip
     const isPaceStyle = ['RF', 'RFM', 'LF', 'LFM'].includes(player.bowlingStyle);
     const isSpinStyle = ['OB', 'SLA', 'LB', 'CLA'].includes(player.bowlingStyle);
     if (!isDesperate && needLevel !== 'high') {
-      if (isPaceStyle && team.playStyle.pacePreference < 0.35 && Math.random() > 0.3) return { willBid: false };
-      if (isSpinStyle && team.playStyle.pacePreference > 0.75 && Math.random() > 0.3) return { willBid: false };
+      if (isPaceStyle && team.playStyle.pacePreference < 0.3 && Math.random() < 0.5) return { willBid: false };
+      if (isSpinStyle && team.playStyle.pacePreference > 0.75 && Math.random() < 0.5) return { willBid: false };
     }
 
     // ===== Step 1: NEED SCORE (0-100) — Sub-role aware =====
