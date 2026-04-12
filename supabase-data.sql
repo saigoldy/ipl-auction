@@ -2226,44 +2226,6 @@ INSERT INTO players (id, name, nationality, is_overseas, age, role, sub_role, ba
 );
 
 INSERT INTO players (id, name, nationality, is_overseas, age, role, sub_role, batting_style, bowling_style, stats, base_price, star_power, team_history, franchise_history, hidden_gem, hidden_gem_ceiling) VALUES (
-  'SHH_KHAN',
-  'Shaheen Shah Afridi',
-  'PAK',
-  true,
-  26,
-  'bowler',
-  'powerplay-bowler',
-  'LHB',
-  'LF',
-  '{"batting":10,"bowling":86,"fielding":55,"fitness":72,"consistency":74,"clutch":78,"formCeiling":93,"formFloor":52}'::jsonb,
-  200,
-  82,
-  '{}',
-  '{}'::jsonb,
-  false,
-  NULL
-);
-
-INSERT INTO players (id, name, nationality, is_overseas, age, role, sub_role, batting_style, bowling_style, stats, base_price, star_power, team_history, franchise_history, hidden_gem, hidden_gem_ceiling) VALUES (
-  'BAB_AZAM',
-  'Babar Azam',
-  'PAK',
-  true,
-  30,
-  'batter',
-  'top-order',
-  'RHB',
-  NULL,
-  '{"batting":82,"bowling":5,"fielding":75,"fitness":80,"consistency":80,"clutch":68,"formCeiling":90,"formFloor":52}'::jsonb,
-  200,
-  80,
-  '{}',
-  '{}'::jsonb,
-  false,
-  NULL
-);
-
-INSERT INTO players (id, name, nationality, is_overseas, age, role, sub_role, batting_style, bowling_style, stats, base_price, star_power, team_history, franchise_history, hidden_gem, hidden_gem_ceiling) VALUES (
   'NAZ_GHULAM',
   'Noor Ahmad',
   'AFG',
@@ -2413,25 +2375,6 @@ INSERT INTO players (id, name, nationality, is_overseas, age, role, sub_role, ba
   '{}'::jsonb,
   true,
   72
-);
-
-INSERT INTO players (id, name, nationality, is_overseas, age, role, sub_role, batting_style, bowling_style, stats, base_price, star_power, team_history, franchise_history, hidden_gem, hidden_gem_ceiling) VALUES (
-  'HAS_AHMED',
-  'Hasan Ali',
-  'PAK',
-  true,
-  30,
-  'bowler',
-  'pace',
-  'LHB',
-  'RFM',
-  '{"batting":15,"bowling":68,"fielding":55,"fitness":72,"consistency":55,"clutch":58,"formCeiling":80,"formFloor":38}'::jsonb,
-  75,
-  48,
-  '{}',
-  '{}'::jsonb,
-  false,
-  NULL
 );
 
 INSERT INTO players (id, name, nationality, is_overseas, age, role, sub_role, batting_style, bowling_style, stats, base_price, star_power, team_history, franchise_history, hidden_gem, hidden_gem_ceiling) VALUES (
