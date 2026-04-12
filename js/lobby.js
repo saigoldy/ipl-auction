@@ -325,13 +325,13 @@ window.Lobby = (function() {
 
       // Try each room to find an active one (including in-progress auctions)
       for (const entry of myEntries) {
-        const { data: room, error: e2 } = await sb.from('rooms')
+        const { data: rooms } = await sb.from('rooms')
           .select('*')
           .eq('id', entry.room_id)
-          .in('status', ['waiting', 'picking_teams', 'auction', 'simulation'])
-          .single();
+          .in('status', ['waiting', 'picking_teams', 'auction', 'simulation']);
 
-        if (room && !e2) {
+        if (rooms && rooms.length > 0) {
+          const room = rooms[0];
           currentRoom = room;
           subscribeToRoom(room.id);
           console.log('Auto-rejoined room:', room.code, 'status:', room.status);
