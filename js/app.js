@@ -7,6 +7,125 @@ window.App = (function() {
   let currentHumanIdx = 0;
   let auctionViewTeam = null; // which team's squad is shown
 
+  // ===== OFFLINE SAVE/RESUME =====
+  const SAVE_KEY = 'ipl_auction_save_v1';
+
+  function saveGame(phase) {
+    if (window.onlineMode) return; // don't save online games
+    try {
+      const states = AuctionEngine.getAllTeamStates();
+      const simState = SimulationEngine && SimulationEngine.getState ? SimulationEngine.getState() : null;
+      const save = {
+        timestamp: Date.now(),
+        phase: phase, // 'squad_review', 'xi_setup', 'tournament', 'playoffs'
+        teamStates: Object.fromEntries(Object.entries(states).map(([id, s]) => [id, {
+          budget: s.budget,
+          squad: s.squad,
+          filled: s.filled,
+          roleCount: s.roleCount,
+          subRoleCount: s.subRoleCount,
+          overseasCount: s.overseasCount,
+          overseasByRole: s.overseasByRole,
+          isHuman: s.isHuman,
+          humanName: s.humanName
+        }])),
+        teamOwnership,
+        userXISelections: window.userXISelections || {},
+        tournament: simState ? {
+          schedule: simState.schedule,
+          currentMatch: simState.currentMatch,
+          standings: simState.standings,
+          playerForms: simState.playerForms,
+          completedMatches: simState.completedMatches,
+          playoffs: simState.playoffs,
+          champion: simState.champion
+        } : null
+      };
+      localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+      console.log('Game saved at phase:', phase);
+    } catch (e) {
+      console.error('Save failed:', e);
+    }
+  }
+
+  function loadSavedGame() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearSavedGame() {
+    localStorage.removeItem(SAVE_KEY);
+  }
+
+  function checkForSavedGame() {
+    const save = loadSavedGame();
+    const btn = document.getElementById('btn-resume-game');
+    const info = document.getElementById('resume-info');
+    if (save && btn) {
+      btn.style.display = '';
+      const date = new Date(save.timestamp).toLocaleString();
+      const phaseLabel = {
+        'squad_review': 'After auction',
+        'xi_setup': 'Choosing XI',
+        'tournament': 'Tournament in progress',
+        'playoffs': 'Playoffs'
+      }[save.phase] || save.phase;
+      if (info) {
+        info.style.display = '';
+        info.innerHTML = `Saved: ${phaseLabel} — ${date}`;
+      }
+    }
+  }
+
+  function resumeOfflineGame() {
+    const save = loadSavedGame();
+    if (!save) { alert('No saved game found'); return; }
+
+    // Restore team ownership
+    teamOwnership = save.teamOwnership || {};
+    humanPlayerCount = Object.values(teamOwnership).filter(o => o.type === 'human').length;
+
+    // Build humanTeams for AuctionEngine init
+    const humanTeams = {};
+    Object.entries(teamOwnership).forEach(([tid, o]) => {
+      if (o.type === 'human') humanTeams[tid] = o.name;
+    });
+
+    // Re-init auction engine with saved data
+    AuctionEngine.init(humanTeams);
+    // Restore team states
+    const states = AuctionEngine.getAllTeamStates();
+    Object.entries(save.teamStates).forEach(([tid, saved]) => {
+      Object.assign(states[tid], saved);
+    });
+
+    // Restore user XI
+    window.userXISelections = save.userXISelections || {};
+
+    // Restore simulation if present
+    if (save.tournament && window.SimulationEngine) {
+      SimulationEngine.init(states);
+      const simState = SimulationEngine.getState();
+      Object.assign(simState, save.tournament);
+    }
+
+    // Jump to the right screen
+    if (save.phase === 'squad_review') {
+      showScreen('squad-review');
+      renderSquadReview();
+    } else if (save.phase === 'xi_setup') {
+      showPlayingXISetup();
+    } else if (save.phase === 'tournament' || save.phase === 'playoffs') {
+      showScreen('tournament');
+      renderPointsTable();
+    }
+  }
+
   function showScreen(id) {
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     const el = document.getElementById('screen-' + id);
@@ -20,6 +139,8 @@ window.App = (function() {
       // Show "Play Online" only if logged in
       const onlineBtn = document.getElementById('btn-play-online');
       if (onlineBtn) onlineBtn.style.display = Auth.getUser() ? '' : 'none';
+      // Check for saved game
+      checkForSavedGame();
     }
   }
 
@@ -499,6 +620,9 @@ window.App = (function() {
     addAuctionLog('🏁 AUCTION COMPLETE! All players have been auctioned.', 'dramatic');
     document.getElementById('bid-controls').classList.add('hidden');
 
+    // Save game state after auction completes (offline only)
+    saveGame('squad_review');
+
     setTimeout(() => {
       showScreen('squad-review');
       renderSquadReview();
@@ -771,6 +895,7 @@ window.App = (function() {
   function confirmXI() {
     // Pass XI selections to simulation engine
     window.userXISelections = userXISelections;
+    saveGame('tournament');
     startTournamentWithXI();
   }
 
@@ -806,6 +931,7 @@ window.App = (function() {
       renderPointsTable();
       document.getElementById('match-counter').textContent =
         `Match ${state.currentMatch} of ${state.schedule.length}`;
+      saveGame('tournament');
     }
   }
 
@@ -1014,6 +1140,9 @@ window.App = (function() {
 
   // ===== RESULT =====
   function showResult() {
+    // Tournament complete — clear saved game
+    clearSavedGame();
+
     const state = SimulationEngine.getState();
     const champion = TEAMS.find(t => t.id === state.champion);
     const performers = SimulationEngine.getTopPerformers();
@@ -1175,6 +1304,7 @@ window.App = (function() {
     placeBidFor, passBidFor, togglePause, simulateAuction, handleOnlineEvent,
     viewSquad, showReviewTeam, startTournament,
     showPlayingXISetup, switchXITeam, toggleXIPlayer, toggleImpact, autoSelectXI, confirmXI,
-    simNext, simFive, simAll
+    simNext, simFive, simAll,
+    resumeOfflineGame, checkForSavedGame, clearSavedGame
   };
 })();
