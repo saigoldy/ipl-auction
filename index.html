@@ -651,13 +651,13 @@
       // Receive remote bids/passes from non-host players
       Lobby.callbacks.onBid = (payload) => {
         console.log('HOST received bid from remote player:', payload);
-        if (payload.teamId && payload.userId !== Auth.getUser().id) {
+        if (payload.teamId && payload.userId !== Auth.getUser()?.id) {
           AuctionEngine.humanBid(payload.teamId);
         }
       };
       Lobby.callbacks.onPass = (payload) => {
         console.log('HOST received pass from remote player:', payload);
-        if (payload.teamId && payload.userId !== Auth.getUser().id) {
+        if (payload.teamId && payload.userId !== Auth.getUser()?.id) {
           AuctionEngine.humanPass(payload.teamId);
         }
       };
@@ -684,7 +684,7 @@
         if (room.status === 'auction') {
           const players = await Lobby.getRoomPlayers();
           cachedRoomPlayers = players || [];
-          const myTeamId = players.find(p => p.user_id === Auth.getUser().id)?.team_id || null;
+          const myTeamId = players.find(p => p.user_id === Auth.getUser()?.id)?.team_id || null;
           const ht = buildHumanTeamsFromPlayers(players);
           window.onlineMode = true;
           AuctionEngine.setOnlineTimer(true);

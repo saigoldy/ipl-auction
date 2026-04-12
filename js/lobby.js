@@ -159,6 +159,7 @@ window.Lobby = (function() {
   function sendBid(teamId, amount) {
     if (!realtimeChannel) return;
     const user = Auth.getUser();
+    if (!user) { console.error('sendBid: no user'); return; }
     realtimeChannel.send({
       type: 'broadcast',
       event: 'bid',
@@ -170,6 +171,7 @@ window.Lobby = (function() {
   function sendPass(teamId) {
     if (!realtimeChannel) return;
     const user = Auth.getUser();
+    if (!user) { console.error('sendPass: no user'); return; }
     realtimeChannel.send({
       type: 'broadcast',
       event: 'pass',
@@ -181,6 +183,7 @@ window.Lobby = (function() {
   function sendPause() {
     if (!realtimeChannel) return;
     const user = Auth.getUser();
+    if (!user) return;
     realtimeChannel.send({
       type: 'broadcast',
       event: 'pause_request',
@@ -204,7 +207,7 @@ window.Lobby = (function() {
     if (realtimeChannel) sb.removeChannel(realtimeChannel);
 
     realtimeChannel = sb.channel(`room:${roomId}`, {
-      config: { presence: { key: Auth.getUser().id } }
+      config: { presence: { key: Auth.getUser()?.id || 'anon' } }
     });
 
     // Presence — track who's online
@@ -274,7 +277,8 @@ window.Lobby = (function() {
 
     realtimeChannel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
-        await realtimeChannel.track({ user_id: Auth.getUser().id, online_at: new Date().toISOString() });
+        const u = Auth.getUser();
+        if (u) await realtimeChannel.track({ user_id: u.id, online_at: new Date().toISOString() });
       }
     });
   }
