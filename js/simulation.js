@@ -300,6 +300,91 @@ window.SimulationEngine = (function() {
     return candidates[0].idx;
   }
 
+  // Use user-saved XI, with like-for-like replacement for injured players
+  function selectUserXI(teamId, squad, userXI) {
+    const selected = [];
+    const missingStarters = [];
+
+    // Go through user's starters; if any are injured, find like-for-like replacement
+    userXI.starters.forEach(pid => {
+      const player = squad.find(p => p.id === pid);
+      if (!player) return; // player not in squad (shouldn't happen)
+      const form = tournament.playerForms[player.id];
+      const isInjured = form && form.isInjured;
+
+      if (!isInjured) {
+        selected.push(player);
+      } else {
+        missingStarters.push(player);
+      }
+    });
+
+    // For each injured starter, find best like-for-like replacement
+    missingStarters.forEach(injured => {
+      const available = squad.filter(p =>
+        !selected.includes(p) &&
+        !(tournament.playerForms[p.id] && tournament.playerForms[p.id].isInjured)
+      );
+      if (available.length === 0) return;
+
+      // Same role first
+      const sameRole = available.filter(p => p.role === injured.role);
+      const pool = sameRole.length > 0 ? sameRole : available;
+
+      // Respect overseas limit (max 4)
+      const overseasCount = selected.filter(p => p.isOverseas).length;
+      const eligiblePool = overseasCount >= 4 ? pool.filter(p => !p.isOverseas) : pool;
+      const finalPool = eligiblePool.length > 0 ? eligiblePool : pool;
+
+      // Pick best-rated from eligible
+      finalPool.sort((a, b) => ratePlayer(b) - ratePlayer(a));
+      selected.push(finalPool[0]);
+    });
+
+    // If somehow still short, fill from squad
+    while (selected.length < 11) {
+      const rest = squad.filter(p =>
+        !selected.includes(p) &&
+        !(tournament.playerForms[p.id] && tournament.playerForms[p.id].isInjured)
+      );
+      if (rest.length === 0) break;
+      rest.sort((a, b) => ratePlayer(b) - ratePlayer(a));
+      selected.push(rest[0]);
+    }
+
+    // Impact player: use saved choice if not injured and not in XI already
+    let impactPlayer = null;
+    if (userXI.impactPlayer) {
+      const imp = squad.find(p => p.id === userXI.impactPlayer);
+      if (imp && !selected.includes(imp)) {
+        const impForm = tournament.playerForms[imp.id];
+        if (!impForm || !impForm.isInjured) {
+          impactPlayer = imp;
+        }
+      }
+    }
+
+    // Fallback impact: best available bench player
+    if (!impactPlayer) {
+      const bench = squad.filter(p =>
+        !selected.includes(p) &&
+        !(tournament.playerForms[p.id] && tournament.playerForms[p.id].isInjured)
+      );
+      const overseasInXI = selected.filter(p => p.isOverseas).length;
+      const eligible = overseasInXI >= 4 ? bench.filter(p => !p.isOverseas) : bench;
+      if (eligible.length > 0) {
+        eligible.sort((a, b) => ratePlayer(b) - ratePlayer(a));
+        impactPlayer = eligible[0];
+      }
+    }
+
+    return {
+      playing11: selected,
+      impactPlayer,
+      overseasInXI: selected.filter(p => p.isOverseas).length
+    };
+  }
+
   function ratePlayer(p) {
     const form = tournament.playerForms[p.id];
     const formMod = form ? form.currentForm / 70 : 1;
@@ -308,10 +393,16 @@ window.SimulationEngine = (function() {
   }
 
   // Select Playing XI + Impact Player substitute
-  // Returns { playing11, impactPlayer, impactSubs, overseasInXI }
+  // Returns { playing11, impactPlayer, overseasInXI }
   function selectPlaying11(teamId) {
     const ts = tournament.teamStates[teamId];
     const squad = ts.squad.map(s => s.player);
+
+    // Check if user has saved an XI for this team
+    const userXI = window.userXISelections && window.userXISelections[teamId];
+    if (userXI && userXI.starters && userXI.starters.length === 11) {
+      return selectUserXI(teamId, squad, userXI);
+    }
 
     // Filter out injured
     const available = squad.filter(p => {

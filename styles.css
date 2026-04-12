@@ -512,3 +512,38 @@ a { color: var(--gold); }
   .points-table { font-size: 11px; }
   .match-teams-row { font-size: 14px; flex-direction: column; gap: 4px; text-align: center; }
 }
+
+/* ===== PLAYING XI SETUP ===== */
+.xi-teams-tabs { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 12px 0; }
+.xi-team-tab { padding: 8px 16px; background: var(--card); border: 2px solid #2a2a3e; border-radius: 6px; cursor: pointer; font-weight: 600; }
+.xi-team-tab.active { border-color: var(--gold); background: #2a2a3e; }
+.xi-setup-info { text-align: center; color: var(--text-dim); margin-bottom: 16px; font-size: 13px; }
+.xi-layout { display: grid; grid-template-columns: 1fr 300px 1fr; gap: 16px; max-width: 1400px; margin: 0 auto; padding: 0 16px; }
+.xi-starters-panel, .xi-impact-panel, .xi-squad-panel { background: var(--card); border-radius: 10px; padding: 16px; max-height: 600px; overflow-y: auto; }
+.xi-starters-panel h3, .xi-impact-panel h3, .xi-squad-panel h3 { font-size: 15px; margin-bottom: 10px; color: var(--gold); }
+.xi-rules { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; padding: 8px; background: #0f0f1a; border-radius: 6px; }
+.xi-rules .rule-ok { color: var(--green); }
+.xi-rules .rule-fail { color: var(--red); }
+.xi-starters-grid, .xi-impact-grid, .xi-squad-grid { display: flex; flex-direction: column; gap: 6px; }
+.xi-player-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: #0f0f1a; border-left: 3px solid #333; border-radius: 4px; cursor: pointer; font-size: 12px; transition: all 0.2s; }
+.xi-player-row:hover { background: #1a1a2e; transform: translateX(2px); }
+.xi-player-row.selected { border-left-color: var(--green); background: rgba(76,175,80,0.1); }
+.xi-player-row.impact { border-left-color: #7C4DFF; background: rgba(124,77,255,0.15); }
+.xi-player-row .player-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.xi-player-row .player-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.xi-player-row .player-meta { font-size: 10px; color: var(--text-dim); }
+.xi-player-row .overseas-badge { color: #ffa726; }
+.xi-player-row .role-tag { padding: 2px 6px; border-radius: 3px; font-size: 9px; font-weight: 700; }
+.xi-player-row .role-tag.batter { background: rgba(76,175,80,0.2); color: #4CAF50; }
+.xi-player-row .role-tag.bowler { background: rgba(244,67,54,0.2); color: #f44336; }
+.xi-player-row .role-tag.allRounder { background: rgba(255,167,38,0.2); color: #ffa726; }
+.xi-player-row .role-tag.wicketkeeper { background: rgba(156,39,176,0.2); color: #9c27b0; }
+.xi-actions { display: flex; gap: 12px; justify-content: center; margin: 20px 0; flex-wrap: wrap; }
+#btn-confirm-xi:disabled { opacity: 0.4; cursor: not-allowed; }
+#xi-count { font-size: 14px; font-weight: 700; }
+.xi-impact-hint { font-size: 11px; color: var(--text-dim); margin-bottom: 10px; }
+
+@media (max-width: 900px) {
+  .xi-layout { grid-template-columns: 1fr; max-height: none; }
+  .xi-starters-panel, .xi-impact-panel, .xi-squad-panel { max-height: 400px; }
+}

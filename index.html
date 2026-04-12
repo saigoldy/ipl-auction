@@ -209,7 +209,37 @@
     <h2 class="section-title">Squad Review</h2>
     <div class="squad-review-tabs" id="review-tabs"></div>
     <div class="squad-review-content" id="review-content"></div>
-    <button class="btn btn-primary btn-large" onclick="App.startTournament()">Start IPL Tournament</button>
+    <button class="btn btn-primary btn-large" onclick="App.showPlayingXISetup()">Next: Choose Playing XI</button>
+  </section>
+
+  <!-- ===== PLAYING XI SETUP SCREEN ===== -->
+  <section id="screen-xi-setup" class="screen">
+    <h2 class="section-title">Playing XI & Impact Player</h2>
+    <div class="xi-teams-tabs" id="xi-teams-tabs"></div>
+    <div class="xi-setup-info" id="xi-setup-info">
+      <p>Select 11 starters (max 4 overseas) + 1 Impact Player from 4 subs</p>
+    </div>
+    <div class="xi-layout">
+      <div class="xi-starters-panel">
+        <h3>Starting XI <span id="xi-count" style="color:var(--gold)">0/11</span></h3>
+        <div class="xi-rules" id="xi-rules"></div>
+        <div class="xi-starters-grid" id="xi-starters-grid"></div>
+      </div>
+      <div class="xi-impact-panel">
+        <h3>Impact Player</h3>
+        <p class="xi-impact-hint" id="xi-impact-hint">Pick one substitute as your Impact Player</p>
+        <div class="xi-impact-grid" id="xi-impact-grid"></div>
+      </div>
+      <div class="xi-squad-panel">
+        <h3>Squad</h3>
+        <p style="color:var(--text-dim);font-size:12px">Click to add/remove from XI</p>
+        <div class="xi-squad-grid" id="xi-squad-grid"></div>
+      </div>
+    </div>
+    <div class="xi-actions">
+      <button class="btn btn-secondary" onclick="App.autoSelectXI()">Auto-Select XI</button>
+      <button class="btn btn-primary btn-large" id="btn-confirm-xi" onclick="App.confirmXI()">Confirm & Start Tournament</button>
+    </div>
   </section>
 
   <!-- ===== TOURNAMENT SCREEN ===== -->

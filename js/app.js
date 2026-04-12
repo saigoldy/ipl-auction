@@ -549,6 +549,235 @@ window.App = (function() {
     content.innerHTML = html;
   }
 
+  // ===== PLAYING XI SETUP =====
+  const userXISelections = {}; // teamId -> { starters: [...playerIds], impactPlayer: playerId }
+  let currentXITeam = null;
+
+  function showPlayingXISetup() {
+    // Get human teams that need XI setup
+    const states = AuctionEngine.getAllTeamStates();
+    const humanTeamIds = TEAMS.filter(t => {
+      const ts = states[t.id];
+      return ts && ts.isHuman;
+    }).map(t => t.id);
+
+    // In online mode, only THIS user's team needs setup
+    let teamsToSetup = humanTeamIds;
+    if (window.onlineMode && window.myOnlineTeamId) {
+      teamsToSetup = [window.myOnlineTeamId];
+    }
+
+    // Auto-select XI for teams that don't have one yet
+    teamsToSetup.forEach(tid => {
+      if (!userXISelections[tid]) {
+        userXISelections[tid] = autoSelectXIForTeam(tid);
+      }
+    });
+
+    if (teamsToSetup.length === 0) {
+      // No humans — skip to tournament
+      startTournamentWithXI();
+      return;
+    }
+
+    currentXITeam = teamsToSetup[0];
+    showScreen('xi-setup');
+    renderXITeamTabs(teamsToSetup);
+    renderXISetup();
+  }
+
+  function autoSelectXIForTeam(teamId) {
+    const ts = AuctionEngine.getTeamData(teamId);
+    if (!ts) return { starters: [], impactPlayer: null };
+    const squad = ts.squad.map(s => s.player);
+
+    // Sort by rating
+    const rate = p => {
+      const primary = p.role === 'bowler' ? p.stats.bowling :
+                       p.role === 'allRounder' ? (p.stats.batting + p.stats.bowling) / 2 :
+                       p.stats.batting;
+      return primary;
+    };
+
+    const indians = squad.filter(p => !p.isOverseas).sort((a, b) => rate(b) - rate(a));
+    const overseas = squad.filter(p => p.isOverseas).sort((a, b) => rate(b) - rate(a));
+
+    const selected = [];
+    // Max 4 overseas
+    selected.push(...overseas.slice(0, 4));
+    // Fill with best Indians
+    const indianPool = [...indians];
+    // Ensure WK
+    if (!selected.some(p => p.role === 'wicketkeeper')) {
+      const wk = indianPool.find(p => p.role === 'wicketkeeper');
+      if (wk) { selected.push(wk); indianPool.splice(indianPool.indexOf(wk), 1); }
+    }
+    // Ensure 5 bowlers
+    while (selected.filter(p => p.role === 'bowler' || p.role === 'allRounder').length < 5 && indianPool.length) {
+      const bowler = indianPool.find(p => p.role === 'bowler' || p.role === 'allRounder');
+      if (bowler) { selected.push(bowler); indianPool.splice(indianPool.indexOf(bowler), 1); }
+      else break;
+    }
+    // Fill rest
+    while (selected.length < 11 && indianPool.length) selected.push(indianPool.shift());
+
+    // Impact player: best remaining player (Indian if 4 overseas in XI)
+    const overseasInXI = selected.filter(p => p.isOverseas).length;
+    const bench = squad.filter(p => !selected.includes(p)).sort((a, b) => rate(b) - rate(a));
+    const eligibleImpact = overseasInXI >= 4 ? bench.filter(p => !p.isOverseas) : bench;
+    const impactPlayer = eligibleImpact.length > 0 ? eligibleImpact[0].id : null;
+
+    return { starters: selected.map(p => p.id), impactPlayer };
+  }
+
+  function renderXITeamTabs(humanTeamIds) {
+    const tabs = document.getElementById('xi-teams-tabs');
+    tabs.innerHTML = humanTeamIds.map(tid => {
+      const team = TEAMS.find(t => t.id === tid);
+      const active = tid === currentXITeam;
+      return `<div class="xi-team-tab${active ? ' active' : ''}" style="color:${team.colors.primary}" onclick="App.switchXITeam('${tid}')">${team.emoji} ${team.shortName}</div>`;
+    }).join('');
+  }
+
+  function switchXITeam(teamId) {
+    currentXITeam = teamId;
+    const tabs = document.querySelectorAll('.xi-team-tab');
+    tabs.forEach((t, i) => {
+      t.classList.toggle('active', t.textContent.trim().endsWith(TEAMS.find(x => x.id === teamId).shortName));
+    });
+    renderXISetup();
+  }
+
+  function renderXISetup() {
+    if (!currentXITeam) return;
+    const teamId = currentXITeam;
+    const ts = AuctionEngine.getTeamData(teamId);
+    if (!ts) return;
+    const squad = ts.squad.map(s => s.player);
+    const sel = userXISelections[teamId];
+
+    // Starters panel
+    const startersGrid = document.getElementById('xi-starters-grid');
+    const starterPlayers = sel.starters.map(id => squad.find(p => p.id === id)).filter(Boolean);
+    startersGrid.innerHTML = starterPlayers.length === 0
+      ? '<p style="color:var(--text-dim);font-size:12px;text-align:center">No players selected</p>'
+      : starterPlayers.map(p => renderXIPlayerRow(p, 'selected', teamId)).join('');
+
+    // Impact player panel — show 4 substitutes, highlight selected impact
+    const impactGrid = document.getElementById('xi-impact-grid');
+    const nonStarters = squad.filter(p => !sel.starters.includes(p.id));
+    const subs = nonStarters.slice(0, Math.min(4, nonStarters.length));
+    const overseasInXI = starterPlayers.filter(p => p.isOverseas).length;
+
+    impactGrid.innerHTML = subs.length === 0
+      ? '<p style="color:var(--text-dim);font-size:12px;text-align:center">No substitutes available</p>'
+      : subs.map(p => {
+          const isImpact = p.id === sel.impactPlayer;
+          const canBeImpact = !(overseasInXI >= 4 && p.isOverseas);
+          return `<div class="xi-player-row ${isImpact ? 'impact' : ''}" ${canBeImpact ? `onclick="App.toggleImpact('${p.id}')"` : ''} style="${canBeImpact ? '' : 'opacity:0.4;cursor:not-allowed'}">
+            <div class="player-info">
+              <span class="player-name">${p.name} ${isImpact ? '⭐' : ''} ${p.isOverseas ? '<span class="overseas-badge">✈</span>' : ''}</span>
+              <span class="player-meta">${p.role}${!canBeImpact ? ' — blocked (4 overseas already in XI)' : ''}</span>
+            </div>
+            <span class="role-tag ${p.role}">${p.role.substring(0, 3).toUpperCase()}</span>
+          </div>`;
+        }).join('');
+
+    // Squad panel
+    const squadGrid = document.getElementById('xi-squad-grid');
+    squadGrid.innerHTML = squad.map(p => {
+      const inXI = sel.starters.includes(p.id);
+      return `<div class="xi-player-row ${inXI ? 'selected' : ''}" onclick="App.toggleXIPlayer('${p.id}')">
+        <div class="player-info">
+          <span class="player-name">${p.name} ${p.isOverseas ? '<span class="overseas-badge">✈</span>' : ''}</span>
+          <span class="player-meta">${p.role} ${inXI ? '✓ In XI' : ''}</span>
+        </div>
+        <span class="role-tag ${p.role}">${p.role.substring(0, 3).toUpperCase()}</span>
+      </div>`;
+    }).join('');
+
+    // Update counts and rules
+    document.getElementById('xi-count').textContent = `${sel.starters.length}/11`;
+    renderXIRules(starterPlayers, squad, sel);
+    validateXI(sel, starterPlayers);
+  }
+
+  function renderXIPlayerRow(p, cls, teamId) {
+    const team = TEAMS.find(t => t.id === teamId);
+    return `<div class="xi-player-row ${cls}" onclick="App.toggleXIPlayer('${p.id}')">
+      <div class="player-info">
+        <span class="player-name">${p.name} ${p.isOverseas ? '<span class="overseas-badge">✈</span>' : ''}</span>
+        <span class="player-meta">${p.role}</span>
+      </div>
+      <span class="role-tag ${p.role}">${p.role.substring(0, 3).toUpperCase()}</span>
+    </div>`;
+  }
+
+  function renderXIRules(starters, squad, sel) {
+    const rules = document.getElementById('xi-rules');
+    const overseas = starters.filter(p => p.isOverseas).length;
+    const wk = starters.filter(p => p.role === 'wicketkeeper').length;
+    const bowlers = starters.filter(p => p.role === 'bowler' || p.role === 'allRounder').length;
+
+    const rule = (ok, txt) => `<span class="${ok ? 'rule-ok' : 'rule-fail'}">${ok ? '✓' : '✗'} ${txt}</span>`;
+
+    rules.innerHTML = [
+      rule(starters.length === 11, `Exactly 11 starters (${starters.length}/11)`),
+      rule(overseas <= 4, `Max 4 overseas (${overseas}/4)`),
+      rule(wk >= 1, `At least 1 wicketkeeper (${wk})`),
+      rule(bowlers >= 5, `At least 5 bowlers/allrounders (${bowlers})`),
+      rule(sel.impactPlayer !== null, `Impact player selected`)
+    ].join('<br>');
+  }
+
+  function validateXI(sel, starters) {
+    const btn = document.getElementById('btn-confirm-xi');
+    const overseas = starters.filter(p => p.isOverseas).length;
+    const wk = starters.filter(p => p.role === 'wicketkeeper').length;
+    const bowlers = starters.filter(p => p.role === 'bowler' || p.role === 'allRounder').length;
+    const valid = starters.length === 11 && overseas <= 4 && wk >= 1 && bowlers >= 5 && sel.impactPlayer !== null;
+    btn.disabled = !valid;
+  }
+
+  function toggleXIPlayer(playerId) {
+    const sel = userXISelections[currentXITeam];
+    if (!sel) return;
+    const idx = sel.starters.indexOf(playerId);
+    if (idx >= 0) {
+      sel.starters.splice(idx, 1);
+      // If this was impact player, clear it
+      if (sel.impactPlayer === playerId) sel.impactPlayer = null;
+    } else {
+      if (sel.starters.length >= 11) return; // max 11
+      sel.starters.push(playerId);
+      // If it was impact, move it to starters (can't be both)
+      if (sel.impactPlayer === playerId) sel.impactPlayer = null;
+    }
+    renderXISetup();
+  }
+
+  function toggleImpact(playerId) {
+    const sel = userXISelections[currentXITeam];
+    if (!sel) return;
+    sel.impactPlayer = sel.impactPlayer === playerId ? null : playerId;
+    renderXISetup();
+  }
+
+  function autoSelectXI() {
+    userXISelections[currentXITeam] = autoSelectXIForTeam(currentXITeam);
+    renderXISetup();
+  }
+
+  function confirmXI() {
+    // Pass XI selections to simulation engine
+    window.userXISelections = userXISelections;
+    startTournamentWithXI();
+  }
+
+  function startTournamentWithXI() {
+    startTournament();
+  }
+
   // ===== TOURNAMENT =====
   function startTournament() {
     const states = AuctionEngine.getAllTeamStates();
@@ -945,6 +1174,7 @@ window.App = (function() {
     showScreen, renamePlayer, startAuction, startAuctionWithTeams, placeBid, passBid,
     placeBidFor, passBidFor, togglePause, simulateAuction, handleOnlineEvent,
     viewSquad, showReviewTeam, startTournament,
+    showPlayingXISetup, switchXITeam, toggleXIPlayer, toggleImpact, autoSelectXI, confirmXI,
     simNext, simFive, simAll
   };
 })();
