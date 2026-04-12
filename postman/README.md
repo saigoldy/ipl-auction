@@ -87,3 +87,43 @@ Postman cannot access browser `localStorage`. Use these scripts instead:
 ```javascript
 localStorage.removeItem('ipl_auction_save_v1'); location.reload();
 ```
+
+---
+
+## Live Game Instance Budget Change
+
+To change budget **during an in-progress auction or tournament** (affects only this running game instance):
+
+**E) Change a team's budget LIVE (during auction):**
+```javascript
+(() => {
+  const teamId = 'MI';      // target team
+  const newBudget = 20000;  // in lakhs
+  const states = AuctionEngine.getAllTeamStates();
+  if (states[teamId]) {
+    states[teamId].budget = newBudget;
+    console.log(teamId + ' budget is now ₹' + (newBudget/100) + ' Cr');
+    // Trigger UI refresh
+    if (window.App) document.querySelector('.teams-budget-bar')?.click();
+  }
+})();
+```
+
+**F) Add budget to a team LIVE:**
+```javascript
+(() => {
+  const teamId = 'MI';
+  const bonusCr = 50;  // add 50 Cr
+  const states = AuctionEngine.getAllTeamStates();
+  if (states[teamId]) {
+    states[teamId].budget += bonusCr * 100;
+    console.log(teamId + ' now has ₹' + (states[teamId].budget/100) + ' Cr');
+  }
+})();
+```
+
+**Notes for online:**
+- Run **E** or **F** in the **host's** browser console (host is authoritative)
+- Non-host players will see the updated budget on the next bid/sold broadcast
+- The change only lasts for this game instance — not persisted to DB
+

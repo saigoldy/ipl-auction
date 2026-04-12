@@ -103,7 +103,7 @@
             { "key": "code", "value": "eq.{{room_code}}" }
           ]
         },
-        "description": "Sets the default budget for an unstarted room. Budget is in LAKHS (not crores). Examples:\n- 12500 = ₹125 Cr (default)\n- 15000 = ₹150 Cr\n- 20000 = ₹200 Cr\n- 10000 = ₹100 Cr\n\nNOTE: Only affects rooms in 'waiting' or 'picking_teams' status. Once auction starts, team budgets are in the host's browser memory and cannot be changed via the API."
+        "description": "Changes the budget for ONE SPECIFIC ROOM (game instance) identified by code. Does NOT affect other rooms or global defaults.\n\nBudget is in LAKHS (not crores). Examples:\n- 12500 = ₹125 Cr (default)\n- 15000 = ₹150 Cr\n- 20000 = ₹200 Cr\n- 10000 = ₹100 Cr\n\nScope:\n- Only updates this one room's settings\n- Only affects rooms in 'waiting' or 'picking_teams' status\n- Once auction starts, team budgets are in host's browser memory — use the browser console script (E) in README to change live."
       }
     },
     {
