@@ -396,6 +396,42 @@ window.AuctionEngine = (function() {
     return true;
   }
 
+  // Real IPL franchise archetypes (based on 2008-2025 patterns)
+  // Each franchise has historical preferences that influence bidding
+  const FRANCHISE_PREFS = {
+    MI:   { paceBoost: 1.20, spinBoost: 0.85, youthBoost: 1.15, eldersBoost: 0.85, oldOverseasPenalty: 0.7 },
+    CSK:  { paceBoost: 0.85, spinBoost: 1.30, youthBoost: 0.85, eldersBoost: 1.40, oldOverseasPenalty: 0.95 }, // CSK loves old/experienced
+    RCB:  { paceBoost: 1.00, spinBoost: 0.90, youthBoost: 1.10, eldersBoost: 1.05, oldOverseasPenalty: 0.7, batterBoost: 1.20 },
+    DC:   { paceBoost: 1.05, spinBoost: 1.05, youthBoost: 1.10, eldersBoost: 0.95, oldOverseasPenalty: 0.65 },
+    KKR:  { paceBoost: 0.95, spinBoost: 1.25, youthBoost: 1.00, eldersBoost: 1.00, oldOverseasPenalty: 0.75, mysteryBowler: 1.20 },
+    SRH:  { paceBoost: 1.20, spinBoost: 0.95, youthBoost: 1.05, eldersBoost: 0.95, oldOverseasPenalty: 0.65 },
+    PBKS: { paceBoost: 1.05, spinBoost: 0.95, youthBoost: 1.10, eldersBoost: 0.85, oldOverseasPenalty: 0.6, variance: 1.25 }, // overspend variance
+    RR:   { paceBoost: 0.95, spinBoost: 1.20, youthBoost: 1.20, eldersBoost: 0.85, oldOverseasPenalty: 0.65 },
+    GT:   { paceBoost: 1.10, spinBoost: 1.10, youthBoost: 1.10, eldersBoost: 1.00, oldOverseasPenalty: 0.7, allRounderBoost: 1.20 },
+    LSG:  { paceBoost: 1.10, spinBoost: 0.95, youthBoost: 1.20, eldersBoost: 0.85, oldOverseasPenalty: 0.6 }
+  };
+
+  // Realistic max bid based on player tier (IPL-grounded)
+  function getRealisticMaxBid(player) {
+    const star = player.starPower;
+    const age = player.age;
+
+    // Marquee elite (star 90+) — can go 2-3x base
+    if (star >= 90) return player.basePrice * 3.0;
+    // Top stars (80-89) — 2-2.5x
+    if (star >= 80) return player.basePrice * 2.3;
+    // Mid-tier (60-79) — 1.5-1.8x
+    if (star >= 60) return player.basePrice * 1.8;
+    // Decent (40-59) — 1.3-1.5x
+    if (star >= 40) return player.basePrice * 1.5;
+    // Budget (20-39) — small premium
+    if (star >= 20) return player.basePrice * 1.3;
+    // Uncapped/young (under 20 starPower) — could go 3-5x base in real auctions (auction wars)
+    if (age <= 23 && player.hiddenGem) return player.basePrice * 4.0;
+    // Default low-tier
+    return player.basePrice * 1.2;
+  }
+
   function evaluateBid(team, player, bidAmount) {
     const ts = state.teamStates[team.id];
 
@@ -404,6 +440,27 @@ window.AuctionEngine = (function() {
     if (ts.filled >= 25) return { willBid: false };
     if (player.isOverseas && ts.overseasCount >= 8) return { willBid: false };
     if (!canAfford(team.id, bidAmount)) return { willBid: false };
+
+    // ===== REALISTIC AGE FILTERS (IPL data: overseas 36+ rarely picked) =====
+    // Overseas players over 36: only top stars get picked, others go unsold
+    if (player.isOverseas && player.age >= 36) {
+      const isElite = player.starPower >= 85;
+      if (!isElite) {
+        // 80% skip — they usually go unsold in real IPL
+        if (Math.random() < 0.8) return { willBid: false };
+      }
+    }
+
+    // Indian players over 38: similar filter (Dhoni-tier exception)
+    if (!player.isOverseas && player.age >= 38) {
+      const isLegend = player.starPower >= 90;
+      if (!isLegend && Math.random() < 0.7) return { willBid: false };
+    }
+
+    // Players over 33 with low starPower: budget pickup only
+    if (player.age >= 33 && player.starPower < 50 && bidAmount > player.basePrice * 1.2) {
+      return { willBid: false };
+    }
 
     const role = player.role;
     const needs = team.squadNeeds;
@@ -601,6 +658,20 @@ window.AuctionEngine = (function() {
     let maxBid = player.basePrice * (1 + rawMax / 30);
     maxBid *= (0.7 + team.personality.riskTolerance * 0.6);
 
+    // ===== APPLY FRANCHISE ARCHETYPES (real IPL preferences) =====
+    const prefs = FRANCHISE_PREFS[team.id] || {};
+    if (isPaceStyle && prefs.paceBoost) maxBid *= prefs.paceBoost;
+    if (isSpinStyle && prefs.spinBoost) maxBid *= prefs.spinBoost;
+    if (player.age <= 25 && prefs.youthBoost) maxBid *= prefs.youthBoost;
+    if (player.age >= 33 && prefs.eldersBoost) maxBid *= prefs.eldersBoost;
+    if (player.role === 'allRounder' && prefs.allRounderBoost) maxBid *= prefs.allRounderBoost;
+    if (player.role === 'batter' && prefs.batterBoost) maxBid *= prefs.batterBoost;
+    if (isSpinStyle && player.starPower < 60 && prefs.mysteryBowler) maxBid *= prefs.mysteryBowler; // KKR mystery spin
+    // Old overseas penalty (most franchises avoid 36+ overseas)
+    if (player.isOverseas && player.age >= 36 && prefs.oldOverseasPenalty) maxBid *= prefs.oldOverseasPenalty;
+    // PBKS variance: more likely to overspend (often overpays)
+    if (prefs.variance && Math.random() < 0.3) maxBid *= prefs.variance;
+
     // --- UNPREDICTABILITY FACTORS ---
 
     // 1. Surprise splurge: ~5% chance a team gets irrationally excited about a player
@@ -702,6 +773,13 @@ window.AuctionEngine = (function() {
     // When budget is flush and few slots filled, allow splurges on high-need players
     if (budgetHealthRatio > 0.7 && needScore > 60 && ts.filled < 10) {
       maxBid *= 1.15;
+    }
+
+    // ===== HARD CAP: realistic max bid by player tier (IPL data) =====
+    // Prevents AI from massively overpaying (e.g. 5x base for a mid-tier player)
+    const realisticCap = getRealisticMaxBid(player);
+    if (maxBid > realisticCap) {
+      maxBid = realisticCap;
     }
 
     // Cap at what's actually affordable (hard limit)

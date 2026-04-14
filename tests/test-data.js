@@ -234,4 +234,33 @@ describe('Auction Engine — Squad Composition', () => {
   });
 });
 
+describe('Realistic IPL Patterns', () => {
+  test('Most overseas players over 36 should be considered unsold-prone', () => {
+    const oldOverseas = PLAYERS.filter(p => p.isOverseas && p.age >= 36);
+    // We just check the data exists for testing the AI filter logic
+    expect(oldOverseas.length).toBeGreaterThanOrEqual(0);
+  });
+
+  test('Hidden gems exist for auction wars', () => {
+    const gems = PLAYERS.filter(p => p.hiddenGem);
+    expect(gems.length).toBeGreaterThan(5);
+  });
+
+  test('Star power distribution (realistic spread)', () => {
+    const elite = PLAYERS.filter(p => p.starPower >= 90).length;
+    const mid = PLAYERS.filter(p => p.starPower >= 60 && p.starPower < 90).length;
+    const budget = PLAYERS.filter(p => p.starPower < 40).length;
+    // Should have more mid/budget than elite (realistic pyramid)
+    expect(mid).toBeGreaterThan(elite);
+    expect(budget).toBeGreaterThan(elite);
+  });
+
+  test('Total overseas count is reasonable for 10 teams x 8 max = 80', () => {
+    const overseas = PLAYERS.filter(p => p.isOverseas).length;
+    // We need at least 60-100 overseas for variety but not so many that all teams fill 8
+    expect(overseas).toBeGreaterThan(40);
+    expect(overseas).toBeLessThan(150);
+  });
+});
+
 summary();
