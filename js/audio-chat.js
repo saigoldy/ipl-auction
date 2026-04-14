@@ -281,11 +281,24 @@ window.AudioChat = (function() {
 
   function attachRemoteAudio(userId, stream) {
     if (remoteAudios[userId]) remoteAudios[userId].remove();
+
+    // Verify stream has audio tracks
+    const tracks = stream.getAudioTracks();
+    console.log('[audio] Remote stream from', userId, '— audio tracks:', tracks.length, tracks.map(t => ({ enabled: t.enabled, muted: t.muted, label: t.label })));
+    if (tracks.length === 0) {
+      console.error('[audio] Remote stream has NO audio tracks!');
+      return;
+    }
+
     const audio = document.createElement('audio');
     audio.srcObject = stream;
     audio.autoplay = true;
-    audio.controls = false;
+    // CONTROLS VISIBLE for debugging — small floating player
+    audio.controls = true;
+    audio.style.cssText = 'position:fixed;bottom:8px;right:' + (8 + Object.keys(remoteAudios).length * 220) + 'px;width:200px;z-index:9999;background:#1a1a2e;border:2px solid #7C4DFF;border-radius:6px';
     audio.playsInline = true;
+    audio.volume = 1.0; // max volume
+    audio.muted = false; // explicitly not muted
     audio.id = 'audio-' + userId;
     document.body.appendChild(audio);
     remoteAudios[userId] = audio;
@@ -294,16 +307,63 @@ window.AudioChat = (function() {
     const playPromise = audio.play();
     if (playPromise !== undefined) {
       playPromise.then(() => {
-        console.log('[audio] Playing remote audio from', userId);
+        console.log('[audio] ▶ Playing remote audio from', userId, 'volume:', audio.volume, 'muted:', audio.muted);
       }).catch(e => {
-        console.error('[audio] Autoplay blocked:', e);
-        // Show alert prompting user to interact
+        console.error('[audio] ❌ Autoplay blocked:', e);
         alert('Audio playback was blocked by your browser. Click anywhere on the page to enable audio.');
-        // Try again after user interaction
         document.addEventListener('click', () => audio.play(), { once: true });
       });
     }
+
+    // Audio level meter (visual signal that data is flowing)
+    setupLevelMeter(stream, userId);
+
     updateUI();
+  }
+
+  // Visual indicator: shows green dot when peer is speaking
+  function setupLevelMeter(stream, userId) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+
+      // Create indicator
+      let dot = document.getElementById('audio-dot-' + userId);
+      if (!dot) {
+        dot = document.createElement('div');
+        dot.id = 'audio-dot-' + userId;
+        dot.style.cssText = 'position:fixed;bottom:60px;right:8px;width:14px;height:14px;border-radius:50%;background:#444;z-index:9999;border:2px solid #fff';
+        dot.title = 'Audio level from ' + userId;
+        document.body.appendChild(dot);
+      }
+
+      let lastLog = 0;
+      function check() {
+        if (!remoteAudios[userId]) return;
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a, b) => a + b, 0) / data.length;
+        // Update dot color based on level
+        if (avg > 10) {
+          dot.style.background = '#4CAF50'; // green = audio detected
+          dot.style.transform = `scale(${1 + avg/100})`;
+          if (Date.now() - lastLog > 2000) {
+            console.log('[audio] 🔊 Audio level from', userId, ':', avg.toFixed(1));
+            lastLog = Date.now();
+          }
+        } else {
+          dot.style.background = '#444';
+          dot.style.transform = 'scale(1)';
+        }
+        requestAnimationFrame(check);
+      }
+      check();
+    } catch (e) {
+      console.warn('[audio] Level meter failed:', e);
+    }
   }
 
   function updateUI() {
