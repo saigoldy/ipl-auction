@@ -397,8 +397,48 @@ window.AuctionEngine = (function() {
     const ts = state.teamStates[teamId];
     // ALL teams (human + AI) must reserve budget for remaining mandatory slots
     const slotsNeeded = Math.max(0, 18 - ts.filled - 1);
-    const reserveNeeded = slotsNeeded * 20; // 20L minimum per remaining slot
+    if (slotsNeeded === 0) {
+      // Already at 18+ — can spend freely up to total budget
+      return ts.budget >= bidAmount;
+    }
+
+    // Calculate the realistic minimum cost to fill remaining slots
+    // Look at remaining unsold + upcoming pool to find cheapest available
+    const reserveNeeded = calculateMinReserve(teamId, slotsNeeded);
     return ts.budget - bidAmount >= reserveNeeded;
+  }
+
+  // Calculate minimum budget needed to fill `slotsNeeded` more players
+  // Uses actual base prices from remaining pool (not a flat assumption)
+  function calculateMinReserve(teamId, slotsNeeded) {
+    if (slotsNeeded <= 0) return 0;
+
+    const ts = state.teamStates[teamId];
+    // Combine remaining pool + unsold players
+    const remainingPool = state.playerPool.slice(state.currentIndex + 1);
+    const unsoldPool = state.unsoldPlayers || [];
+    const allAvailable = [...remainingPool, ...unsoldPool];
+
+    // Filter to players this team CAN buy (overseas limit, not in their squad)
+    const teamSquadIds = new Set(ts.squad.map(s => s.player.id));
+    const eligible = allAvailable.filter(p => {
+      if (teamSquadIds.has(p.id)) return false;
+      if (p.isOverseas && ts.overseasCount >= 8) return false;
+      return true;
+    });
+
+    // Sort by base price ascending (cheapest first)
+    const cheapest = [...eligible].sort((a, b) => a.basePrice - b.basePrice);
+
+    // Sum the cheapest `slotsNeeded` players' base prices
+    let total = 0;
+    for (let i = 0; i < slotsNeeded && i < cheapest.length; i++) {
+      total += cheapest[i].basePrice;
+    }
+
+    // Safety floor: at least 20L per slot if pool is somehow exhausted
+    const minimum = slotsNeeded * 20;
+    return Math.max(total, minimum);
   }
 
   function canBuyPlayer(teamId, player) {

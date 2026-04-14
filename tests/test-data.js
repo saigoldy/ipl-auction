@@ -94,11 +94,31 @@ describe('Auction Engine — canAfford', () => {
     AuctionEngine.init({});
     const states = AuctionEngine.getAllTeamStates();
     states.MI.budget = 300; // 3 Cr left
-    states.MI.filled = 5; // 13 more needed; after this player = 12 slots, reserve = 12*20 = 240
-    // Bid 100 → 300 - 100 = 200 vs 240 reserve → cannot afford
-    expect(AuctionEngine.canAfford('MI', 100)).toBe(false);
-    // Bid 60 → 300 - 60 = 240 = reserve → can afford (>=)
-    expect(AuctionEngine.canAfford('MI', 60)).toBe(true);
+    states.MI.filled = 5; // 12 more slots needed (excluding current)
+    // Reserve calculated from cheapest 12 available players' base prices
+    // Should block large bids that would prevent reaching 18
+    const huge = AuctionEngine.canAfford('MI', 290);
+    expect(huge).toBe(false); // would only leave 10L for 12 players
+  });
+
+  test('Can afford after reaching 18 — no reserve needed', () => {
+    AuctionEngine.init({});
+    const states = AuctionEngine.getAllTeamStates();
+    states.MI.budget = 1000;
+    states.MI.filled = 18; // already at min
+    // Can spend up to full budget
+    expect(AuctionEngine.canAfford('MI', 999)).toBe(true);
+    expect(AuctionEngine.canAfford('MI', 1001)).toBe(false);
+  });
+
+  test('Reserve uses actual cheapest player base prices', () => {
+    AuctionEngine.init({});
+    const states = AuctionEngine.getAllTeamStates();
+    states.MI.budget = 500; // 5 Cr
+    states.MI.filled = 16; // need 2 more
+    // Should allow bidding what budget allows minus minimum 2 picks
+    // The cheapest 2 players in pool determine the reserve
+    expect(AuctionEngine.canAfford('MI', 100)).toBe(true);
   });
 
   test('Increment is always 25L (0.25 Cr)', () => {

@@ -489,7 +489,10 @@ window.App = (function() {
       } else if (!canBid) {
         if (player.isOverseas && ts.overseasCount >= 8) helper.textContent = '⚠️ Overseas slots full (8/8)';
         else if (ts.filled >= 25) helper.textContent = '⚠️ Squad full (25/25 max)';
-        else helper.textContent = '⚠️ Cannot afford — need reserve for remaining slots (min 18)';
+        else {
+          const slotsLeft = Math.max(0, 18 - ts.filled);
+          helper.textContent = `⚠️ Cannot bid — need ${slotsLeft} more players. Budget left: ${AuctionEngine.formatPrice(ts.budget)}, need to reserve for cheapest available picks`;
+        }
       } else {
         helper.textContent = `Budget after: ${AuctionEngine.formatPrice(ts.budget - nextBid)} | ${ts.filled}/25 players${needTag}`;
       }
