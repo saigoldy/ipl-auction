@@ -620,7 +620,18 @@ window.SimulationEngine = (function() {
     let recentBoundaries = 0; // boundaries in last 2 overs
 
     // Init batting order — sorted by realistic position
-    const batters = sortBattingOrder([...battingTeam]);
+    let batters = sortBattingOrder([...battingTeam]);
+    // SAFETY CHECK: if somehow a bowler ended up in top 3, force re-sort
+    const top3HasBowler = batters.slice(0, 3).some(p => p.role === 'bowler');
+    if (top3HasBowler) {
+      console.warn('[BUG] Bowler in top 3 — re-sorting strictly');
+      batters = batters.slice().sort((a, b) => {
+        const aIsBowler = a.role === 'bowler' ? 1 : 0;
+        const bIsBowler = b.role === 'bowler' ? 1 : 0;
+        if (aIsBowler !== bIsBowler) return aIsBowler - bIsBowler;
+        return (b.stats.batting || 0) - (a.stats.batting || 0);
+      });
+    }
     const batsmenStats = batters.map(p => ({
       player: p, runs: 0, balls: 0, fours: 0, sixes: 0, howOut: 'not out'
     }));
