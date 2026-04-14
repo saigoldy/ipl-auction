@@ -234,6 +234,64 @@ describe('Auction Engine — Squad Composition', () => {
   });
 });
 
+describe('Batting Order — realistic positions', () => {
+  function getBattingPosition(p) {
+    const sub = p.subRole;
+    const role = p.role;
+    const bat = p.stats.batting || 0;
+    if (role === 'bowler') return 900 - bat;
+    if (role === 'wicketkeeper') {
+      if (bat >= 75) return 200 - bat;
+      return 450 - bat;
+    }
+    if (role === 'batter') {
+      if (sub === 'top-order') return 100 - bat;
+      if (sub === 'middle-order') return 400 - bat;
+      if (sub === 'finisher') return 600 - bat;
+      return 350 - bat;
+    }
+    if (role === 'allRounder') {
+      if (sub === 'batting-ar' && bat >= 65) return 500 - bat;
+      if (sub === 'batting-ar') return 650 - bat;
+      if (sub === 'bowling-ar') return 750 - bat;
+      return 700 - bat;
+    }
+    return 800;
+  }
+
+  test('Quinton de Kock (WK 82) bats before Stokes (allrounder 80)', () => {
+    const dekock = PLAYERS.find(p => p.id === 'QUI_DEKOK');
+    const stokes = PLAYERS.find(p => p.id === 'BEN_STOKES');
+    expect(getBattingPosition(dekock)).toBeLessThan(getBattingPosition(stokes));
+  });
+
+  test('Bumrah (bowler) bats AFTER Patidar (batter)', () => {
+    const bumrah = PLAYERS.find(p => p.id === 'JAS_BUMRAH');
+    const patidar = PLAYERS.find(p => p.id === 'RAJAT_PATIDAR');
+    expect(getBattingPosition(bumrah)).toBeGreaterThan(getBattingPosition(patidar));
+  });
+
+  test('Kuldeep Yadav (bowler) bats AFTER any batter', () => {
+    const kuldeep = PLAYERS.find(p => p.id === 'KUL_YADAV');
+    const batters = PLAYERS.filter(p => p.role === 'batter').slice(0, 5);
+    batters.forEach(b => {
+      expect(getBattingPosition(kuldeep)).toBeGreaterThan(getBattingPosition(b));
+    });
+  });
+
+  test('Top-order batter (Kohli) bats first', () => {
+    const kohli = PLAYERS.find(p => p.id === 'VIR_KOHLI');
+    const middleOrder = PLAYERS.find(p => p.subRole === 'middle-order' && p.role === 'batter');
+    expect(getBattingPosition(kohli)).toBeLessThan(getBattingPosition(middleOrder));
+  });
+
+  test('Finishers bat after middle-order', () => {
+    const finisher = PLAYERS.find(p => p.subRole === 'finisher');
+    const middle = PLAYERS.find(p => p.subRole === 'middle-order' && p.role === 'batter');
+    if (finisher && middle) expect(getBattingPosition(finisher)).toBeGreaterThan(getBattingPosition(middle));
+  });
+});
+
 describe('Realistic IPL Patterns', () => {
   test('Most overseas players over 36 should be considered unsold-prone', () => {
     const oldOverseas = PLAYERS.filter(p => p.isOverseas && p.age >= 36);
