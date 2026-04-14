@@ -411,25 +411,26 @@ window.AuctionEngine = (function() {
     LSG:  { paceBoost: 1.10, spinBoost: 0.95, youthBoost: 1.20, eldersBoost: 0.85, oldOverseasPenalty: 0.6 }
   };
 
-  // Realistic max bid based on player tier (IPL-grounded)
+  // Realistic max bid based on player tier (IPL-grounded, generous)
+  // Real IPL bidding wars often go 5-10x base for marquee players
   function getRealisticMaxBid(player) {
     const star = player.starPower;
     const age = player.age;
 
-    // Marquee elite (star 90+) — can go 2-3x base
-    if (star >= 90) return player.basePrice * 3.0;
-    // Top stars (80-89) — 2-2.5x
-    if (star >= 80) return player.basePrice * 2.3;
-    // Mid-tier (60-79) — 1.5-1.8x
-    if (star >= 60) return player.basePrice * 1.8;
-    // Decent (40-59) — 1.3-1.5x
-    if (star >= 40) return player.basePrice * 1.5;
-    // Budget (20-39) — small premium
-    if (star >= 20) return player.basePrice * 1.3;
-    // Uncapped/young (under 20 starPower) — could go 3-5x base in real auctions (auction wars)
-    if (age <= 23 && player.hiddenGem) return player.basePrice * 4.0;
+    // Marquee elite (star 90+) — can go up to 5x base in bidding wars
+    if (star >= 90) return player.basePrice * 5.0;
+    // Top stars (80-89) — up to 4x
+    if (star >= 80) return player.basePrice * 4.0;
+    // Mid-tier (60-79) — up to 3x
+    if (star >= 60) return player.basePrice * 3.0;
+    // Decent (40-59) — up to 2.5x
+    if (star >= 40) return player.basePrice * 2.5;
+    // Budget (20-39) — up to 2x
+    if (star >= 20) return player.basePrice * 2.0;
+    // Uncapped/young hidden gems — major auction wars
+    if (age <= 23 && player.hiddenGem) return player.basePrice * 6.0;
     // Default low-tier
-    return player.basePrice * 1.2;
+    return player.basePrice * 1.8;
   }
 
   function evaluateBid(team, player, bidAmount) {
@@ -765,16 +766,47 @@ window.AuctionEngine = (function() {
       if (maxBid > extraCap) maxBid = extraCap;
     }
 
-    // Stars get a small extra boost regardless of phase (everyone wants top players)
+    // Stars get extra boost regardless of phase (everyone wants top players)
     if (player.starPower >= 85 && needScore >= 40) {
+      maxBid *= 1.25;
+    }
+    if (player.starPower >= 70 && needScore >= 30) {
       maxBid *= 1.15;
     }
 
-    // Late auction urgency: if many players left to fill but few options remaining
+    // Late auction urgency: must grab remaining players
     const slotsRemainingInPool = state.playerPool.length - state.currentIndex;
     if (mandatorySlotsLeft > 0 && slotsRemainingInPool < mandatorySlotsLeft * 2) {
-      // Critical: must grab whoever is available
-      maxBid *= 1.4;
+      maxBid *= 1.5;
+    }
+
+    // ===== BURN-THE-BUDGET BOOST =====
+    // If team has lots of budget left late in auction, bid aggressively
+    // Real IPL teams almost always spend 90%+ of their purse
+    const auctionPct = state.currentIndex / state.playerPool.length;
+    const budgetUsedPct = 1 - (ts.budget / 12500);
+
+    // Budget unspent vs auction progress mismatch
+    if (auctionPct > 0.5 && budgetUsedPct < 0.4 && needScore >= 25) {
+      // Halfway done, spent <40% — start spending more aggressively
+      maxBid *= 1.5;
+    }
+    if (auctionPct > 0.7 && budgetUsedPct < 0.6 && needScore >= 20) {
+      // 70% done, still <60% spent — splurge on remaining picks
+      maxBid *= 2.0;
+    }
+    if (auctionPct > 0.85 && ts.budget > 3000) {
+      // Final stretch with >30 Cr unspent — burn it
+      maxBid *= 2.5;
+    }
+    // Also boost if team has reached 18 and still has plenty of budget for 25
+    if (reachedMin && optionalSlotsLeft > 0 && ts.budget > 2000) {
+      const targetSpendPerExtra = ts.budget / Math.max(1, optionalSlotsLeft);
+      // Allow bidding up to 2.5x average for extras
+      const extraBoostCap = targetSpendPerExtra * 2.5;
+      if (maxBid < extraBoostCap && needScore >= 30) {
+        maxBid = Math.max(maxBid, extraBoostCap);
+      }
     }
 
     // ===== HARD CAP: realistic max bid by player tier (IPL data) =====
