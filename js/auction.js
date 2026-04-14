@@ -717,62 +717,64 @@ window.AuctionEngine = (function() {
       maxBid *= 1.3;
     }
 
-    // ===== PURSE AWARENESS (18-player minimum aware) =====
-    const mandatorySlotsLeft = Math.max(0, 18 - ts.filled - 1); // slots still needed for min 18
-    const totalSlotsWanted = Math.max(0, 22 - ts.filled - 1); // aim for 22
-    const slotsFilledPct = ts.filled / 18; // 0 to 1+ (1 = minimum reached)
+    // ===== PURSE AWARENESS — Spend full budget, prioritize 18, then fill to 25 =====
+    const mandatorySlotsLeft = Math.max(0, 18 - ts.filled - 1); // need this many to hit 18
+    const optionalSlotsLeft = Math.max(0, 25 - ts.filled - 1); // upper cap target
+    const reachedMin = ts.filled >= 18;
 
-    // Hard reserve: must keep enough for remaining mandatory slots (30L each)
-    const hardReserve = mandatorySlotsLeft * 30;
+    // Hard reserve: 25L per remaining mandatory slot (lower than before — encourage spending)
+    const hardReserve = mandatorySlotsLeft * 25;
     const maxAffordable = ts.budget - hardReserve;
 
-    // Budget pacing
-    const spendableBudget = Math.max(0, ts.budget - hardReserve);
-    const budgetPerSlot = totalSlotsWanted > 0 ? spendableBudget / totalSlotsWanted : spendableBudget;
-    const budgetHealthRatio = ts.budget / 12500;
+    // Average budget available per remaining slot (encourages full spend)
+    // If have ₹100 Cr left and need 10 more players, avg ₹10 Cr per slot
+    const slotsToFill = Math.max(1, mandatorySlotsLeft + 1); // include current player
+    const avgPerSlot = ts.budget / slotsToFill;
 
-    // Budget discipline: limit per-player spend based on roster progress
-    if (slotsFilledPct < 1.0) {
-      // Early auction (0-5 players): can spend up to 15% on stars, 10% on others
-      // Mid auction (6-12): up to 12% on stars, 8% on others
-      // Late (13-17): up to 20% (more desperate)
-      let maxSpendPct;
-      if (ts.filled < 6) {
-        maxSpendPct = needScore >= 50 ? 0.15 : 0.10;
-      } else if (ts.filled < 13) {
-        maxSpendPct = needScore >= 50 ? 0.12 : 0.08;
-      } else {
-        maxSpendPct = 0.20;
+    // Phase 1: Building 18 (filled < 18) — AGGRESSIVE spending allowed
+    if (!reachedMin) {
+      // Can spend up to 3x average per slot for star players
+      // 1.5x avg for medium-need
+      // 0.7x avg for low-need (save for needed slots)
+      let avgMultiplier;
+      if (needScore >= 70) avgMultiplier = 3.0;       // high need: splurge OK
+      else if (needScore >= 50) avgMultiplier = 2.0;  // medium need
+      else if (needScore >= 30) avgMultiplier = 1.2;  // low need
+      else avgMultiplier = 0.6;                        // not really needed
+
+      const cap = avgPerSlot * avgMultiplier;
+      if (maxBid > cap) maxBid = cap;
+
+      // Boost: if very few slots left to fill 18 and lots of budget, spend more
+      if (mandatorySlotsLeft <= 3 && ts.budget > 2000) {
+        maxBid *= 1.3; // urgency boost — must complete 18
       }
-      const pctCap = ts.budget * maxSpendPct;
-      if (maxBid > pctCap) {
-        maxBid = Math.min(maxBid, pctCap);
-      }
+    } else {
+      // Phase 2: Already have 18+ — opportunistic spending up to 25
+      // Use remaining budget freely, but only on players that genuinely fit
+      const remainingForExtras = Math.max(0, ts.budget - 100); // keep 1 Cr safety
+      const avgForExtras = remainingForExtras / Math.max(1, optionalSlotsLeft + 1);
+
+      let extraMultiplier;
+      if (needScore >= 60) extraMultiplier = 2.5;  // genuine upgrade
+      else if (needScore >= 40) extraMultiplier = 1.5;
+      else if (needScore >= 20) extraMultiplier = 0.8;
+      else extraMultiplier = 0.4;  // probably skip
+
+      const extraCap = avgForExtras * extraMultiplier;
+      if (maxBid > extraCap) maxBid = extraCap;
     }
 
-    // Reduce bids when budget is tight
-    if (budgetHealthRatio < 0.5 && mandatorySlotsLeft > 3) {
-      maxBid *= (0.5 + budgetHealthRatio * 0.8);
-    } else if (budgetHealthRatio < 0.3 && mandatorySlotsLeft > 0) {
-      maxBid *= 0.4;
-    }
-
-    // Don't overspend relative to average-per-slot budget
-    if (totalSlotsWanted > 0 && maxBid > budgetPerSlot * 2.0 && needScore < 50) {
-      maxBid = Math.min(maxBid, budgetPerSlot * 1.8);
-    }
-
-    // Phase-aware: in early auction, limit per-player spend to save for depth
-    if (state.phase === 'MARQUEE' && ts.filled < 5) {
-      const marqueeSpendCap = ts.budget * 0.12;
-      if (needScore < 40 && maxBid > marqueeSpendCap) {
-        maxBid = Math.min(maxBid, marqueeSpendCap);
-      }
-    }
-
-    // When budget is flush and few slots filled, allow splurges on high-need players
-    if (budgetHealthRatio > 0.7 && needScore > 60 && ts.filled < 10) {
+    // Stars get a small extra boost regardless of phase (everyone wants top players)
+    if (player.starPower >= 85 && needScore >= 40) {
       maxBid *= 1.15;
+    }
+
+    // Late auction urgency: if many players left to fill but few options remaining
+    const slotsRemainingInPool = state.playerPool.length - state.currentIndex;
+    if (mandatorySlotsLeft > 0 && slotsRemainingInPool < mandatorySlotsLeft * 2) {
+      // Critical: must grab whoever is available
+      maxBid *= 1.4;
     }
 
     // ===== HARD CAP: realistic max bid by player tier (IPL data) =====

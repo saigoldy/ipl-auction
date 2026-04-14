@@ -158,6 +158,7 @@
       <button class="btn btn-pause" id="btn-pause" onclick="App.togglePause()">⏸ PAUSE</button>
       <button class="btn btn-simulate" id="btn-simulate" onclick="App.simulateAuction()">⚡ SIMULATE ALL</button>
       <button class="btn btn-audio-chat" id="btn-audio-chat" onclick="handleAudioToggle()" style="display:none;background:#7C4DFF;color:#fff;padding:8px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer">🎙️ Join Voice</button>
+      <button class="btn" id="btn-leave-auction" onclick="handleLeaveAuction()" style="display:none;background:#444;color:#fff;padding:8px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer">🚪 Leave Room</button>
       <span id="audio-status" style="font-size:11px;color:var(--text-dim);margin-left:8px"></span>
     </div>
     <div class="auction-main">
@@ -562,9 +563,13 @@
       const currentUser = Auth.getUser();
       window.onlineMode = true;
       AuctionEngine.setOnlineTimer(true);
-      // Show audio chat button
+      // Show audio chat + leave room buttons
       const audioBtn = document.getElementById('btn-audio-chat');
       if (audioBtn) audioBtn.style.display = '';
+      const leaveBtn = document.getElementById('btn-leave-auction');
+      if (leaveBtn) leaveBtn.style.display = '';
+      // Hide Simulate All if 3+ human players (cooperative game)
+      setTimeout(() => updateSimulateButtonVisibility(), 500);
 
       // Build humanTeams — use cached room players as primary source
       // This avoids async race conditions
@@ -740,6 +745,30 @@
       }
     }
 
+    // ===== LEAVE ROOM FROM AUCTION =====
+    async function handleLeaveAuction() {
+      if (!confirm('Leave the room? You can rejoin later from the lobby.')) return;
+      try {
+        if (window.AudioChat && AudioChat.isActive()) AudioChat.stop();
+        await Lobby.leaveRoom();
+        window.onlineMode = false;
+        location.reload(); // clean reset
+      } catch (e) { alert('Leave error: ' + e.message); }
+    }
+
+    // Show/hide Simulate All based on number of human players in room
+    function updateSimulateButtonVisibility() {
+      const simBtn = document.getElementById('btn-simulate');
+      if (!simBtn) return;
+      if (!window.onlineMode) {
+        simBtn.style.display = ''; // always show offline
+        return;
+      }
+      // Online: hide if more than 2 human players in the room
+      const humanCount = Object.keys(onlineHumanTeams || {}).length;
+      simBtn.style.display = humanCount > 2 ? 'none' : '';
+    }
+
     // Save room state to DB (host only, throttled)
     let _persistTimer = null;
     function persistRoomState() {
@@ -910,7 +939,6 @@
               const room = await Lobby.rejoinIfInRoom();
               if (room) {
                 if (room.status === 'auction') {
-                  // Rejoin in-progress auction as non-host client
                   console.log('Rejoining in-progress auction...');
                   const players = await Lobby.getRoomPlayers();
                   cachedRoomPlayers = players || [];
@@ -919,12 +947,18 @@
 
                   window.onlineMode = true;
                   AuctionEngine.setOnlineTimer(true);
-                  App.startAuctionWithTeams(ht, myTeamId, true);
-                  wireRoomCallbacks();
-                  wireClientListeners();
 
-                  // Request current state from host (works without DB migration)
-                  setTimeout(() => requestStateFromHost(), 1500);
+                  const isHostUser = room.host_id === user.id;
+                  // Host: restart engine and continue. Non-host: client mode + request state.
+                  App.startAuctionWithTeams(ht, myTeamId, !isHostUser);
+                  wireRoomCallbacks();
+                  if (isHostUser) {
+                    wireHostBroadcasts();
+                    alert('Welcome back, host! Your auction is being restored. State will resync.');
+                  } else {
+                    wireClientListeners();
+                    setTimeout(() => requestStateFromHost(), 1500);
+                  }
 
                   // Also try DB snapshot as fallback
                   const stateData = await Lobby.loadGameStateFromDB();
