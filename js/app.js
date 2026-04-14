@@ -10,60 +10,74 @@ window.App = (function() {
   // ===== OFFLINE SAVE/RESUME =====
   const SAVE_KEY = 'ipl_auction_save_v1';
 
-  function saveGame(phase) {
-    if (window.onlineMode) return; // don't save online games
-    try {
-      const states = AuctionEngine.getAllTeamStates();
-      const simState = SimulationEngine && SimulationEngine.getState ? SimulationEngine.getState() : null;
-      const save = {
-        timestamp: Date.now(),
-        phase: phase, // 'squad_review', 'xi_setup', 'tournament', 'playoffs'
-        teamStates: Object.fromEntries(Object.entries(states).map(([id, s]) => [id, {
-          budget: s.budget,
-          squad: s.squad,
-          filled: s.filled,
-          roleCount: s.roleCount,
-          subRoleCount: s.subRoleCount,
-          overseasCount: s.overseasCount,
-          overseasByRole: s.overseasByRole,
-          isHuman: s.isHuman,
-          humanName: s.humanName
-        }])),
-        teamOwnership,
-        userXISelections: window.userXISelections || {},
-        tournament: simState ? {
-          schedule: simState.schedule,
-          currentMatch: simState.currentMatch,
-          standings: simState.standings,
-          playerForms: simState.playerForms,
-          completedMatches: simState.completedMatches,
-          playoffs: simState.playoffs,
-          champion: simState.champion
-        } : null
-      };
-      localStorage.setItem(SAVE_KEY, JSON.stringify(save));
-      console.log('Game saved at phase:', phase);
-    } catch (e) {
-      console.error('Save failed:', e);
-    }
+  function buildSaveData(phase) {
+    const states = AuctionEngine.getAllTeamStates();
+    const simState = SimulationEngine && SimulationEngine.getState ? SimulationEngine.getState() : null;
+    return {
+      timestamp: Date.now(),
+      phase: phase,
+      teamStates: Object.fromEntries(Object.entries(states).map(([id, s]) => [id, {
+        budget: s.budget,
+        squad: s.squad,
+        filled: s.filled,
+        roleCount: s.roleCount,
+        subRoleCount: s.subRoleCount,
+        overseasCount: s.overseasCount,
+        overseasByRole: s.overseasByRole,
+        isHuman: s.isHuman,
+        humanName: s.humanName
+      }])),
+      teamOwnership,
+      userXISelections: window.userXISelections || {},
+      tournament: simState ? {
+        schedule: simState.schedule,
+        currentMatch: simState.currentMatch,
+        standings: simState.standings,
+        playerForms: simState.playerForms,
+        completedMatches: simState.completedMatches,
+        playoffs: simState.playoffs,
+        champion: simState.champion
+      } : null
+    };
   }
 
-  function loadSavedGame() {
+  async function saveGame(phase) {
+    if (window.onlineMode) return; // online games saved via room state
+    try {
+      const save = buildSaveData(phase);
+      // Always save locally as fallback
+      localStorage.setItem(SAVE_KEY, JSON.stringify(save));
+      // If logged in, also save to DB
+      if (window.Auth && Auth.getUser()) {
+        await Auth.saveGameToDB(save);
+      }
+      console.log('Game saved at phase:', phase);
+    } catch (e) { console.error('Save failed:', e); }
+  }
+
+  async function loadSavedGame() {
+    // If logged in, prefer DB save
+    if (window.Auth && Auth.getUser()) {
+      const dbSave = await Auth.loadGameFromDB();
+      if (dbSave) return dbSave;
+    }
+    // Fallback to local
     try {
       const raw = localStorage.getItem(SAVE_KEY);
       if (!raw) return null;
       return JSON.parse(raw);
-    } catch (e) {
-      return null;
-    }
+    } catch (e) { return null; }
   }
 
   function clearSavedGame() {
     localStorage.removeItem(SAVE_KEY);
+    if (window.Auth && Auth.getUser()) {
+      Auth.clearGameFromDB();
+    }
   }
 
-  function checkForSavedGame() {
-    const save = loadSavedGame();
+  async function checkForSavedGame() {
+    const save = await loadSavedGame();
     const btn = document.getElementById('btn-resume-game');
     const info = document.getElementById('resume-info');
     if (save && btn) {
@@ -77,13 +91,17 @@ window.App = (function() {
       }[save.phase] || save.phase;
       if (info) {
         info.style.display = '';
-        info.innerHTML = `Saved: ${phaseLabel} — ${date}`;
+        const source = (window.Auth && Auth.getUser()) ? 'cloud' : 'local';
+        info.innerHTML = `Saved: ${phaseLabel} — ${date} (${source})`;
       }
+    } else if (btn) {
+      btn.style.display = 'none';
+      if (info) info.style.display = 'none';
     }
   }
 
-  function resumeOfflineGame() {
-    const save = loadSavedGame();
+  async function resumeOfflineGame() {
+    const save = await loadSavedGame();
     if (!save) { alert('No saved game found'); return; }
 
     // Restore team ownership
@@ -912,12 +930,19 @@ window.App = (function() {
   }
 
   function simNext() {
+    // In online mode, only host can advance the sim; non-host waits for broadcasts
+    if (window.onlineMode && window.Lobby && !Lobby.isHost()) {
+      console.log('Non-host: waiting for host to advance simulation');
+      return;
+    }
+
     const state = SimulationEngine.getState();
     if (SimulationEngine.isLeagueComplete()) {
       // Check if playoffs started
       if (!state.playoffs) {
         SimulationEngine.setupPlayoffs();
         renderPlayoffs();
+        if (window.onlineMode) Lobby.broadcastGameState('sim_playoffs_setup', { playoffs: state.playoffs });
         return;
       }
       // Simulate next playoff
@@ -932,6 +957,15 @@ window.App = (function() {
       document.getElementById('match-counter').textContent =
         `Match ${state.currentMatch} of ${state.schedule.length}`;
       saveGame('tournament');
+
+      // Broadcast match result to non-host clients
+      if (window.onlineMode && window.Lobby) {
+        Lobby.broadcastGameState('sim_match_result', {
+          result: result,
+          standings: state.standings,
+          currentMatch: state.currentMatch
+        });
+      }
     }
   }
 
@@ -1280,6 +1314,34 @@ window.App = (function() {
         break;
       case 'auction_end':
         onAuctionEnd();
+        break;
+      case 'sim_match_result':
+        // Non-host receives a simulated match from host
+        if (payload.result) {
+          const simState = SimulationEngine.getState();
+          if (simState) {
+            simState.completedMatches = simState.completedMatches || [];
+            simState.completedMatches.push(payload.result);
+            simState.currentMatch = payload.currentMatch;
+            if (payload.standings) Object.assign(simState.standings, payload.standings);
+          }
+          if (typeof renderMatchResult === 'function') renderMatchResult(payload.result);
+          if (typeof renderPointsTable === 'function') renderPointsTable();
+        }
+        break;
+      case 'sim_playoffs_setup':
+        if (payload.playoffs) {
+          const simState = SimulationEngine.getState();
+          if (simState) simState.playoffs = payload.playoffs;
+          if (typeof renderPlayoffs === 'function') renderPlayoffs();
+        }
+        break;
+      case 'sim_champion':
+        if (payload.champion) {
+          const simState = SimulationEngine.getState();
+          if (simState) simState.champion = payload.champion;
+          if (typeof showResult === 'function') setTimeout(() => showResult(), 1000);
+        }
         break;
     }
   }

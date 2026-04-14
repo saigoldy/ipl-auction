@@ -191,6 +191,41 @@ window.Lobby = (function() {
     });
   }
 
+  // ===== ROOM STATE PERSISTENCE (for refresh/reconnect resilience) =====
+
+  // Save current game state to DB (host only, called periodically)
+  async function saveGameStateToDB(gameState) {
+    if (!currentRoom) return;
+    const sb = window.supabaseClient;
+    try {
+      await sb.from('rooms').update({
+        game_state: { ...gameState, lastUpdated: new Date().toISOString() }
+      }).eq('id', currentRoom.id);
+    } catch (e) { console.error('saveGameStateToDB:', e); }
+  }
+
+  async function saveSimStateToDB(simState) {
+    if (!currentRoom) return;
+    const sb = window.supabaseClient;
+    try {
+      await sb.from('rooms').update({
+        sim_state: { ...simState, lastUpdated: new Date().toISOString() }
+      }).eq('id', currentRoom.id);
+    } catch (e) { console.error('saveSimStateToDB:', e); }
+  }
+
+  async function loadGameStateFromDB() {
+    if (!currentRoom) return null;
+    const sb = window.supabaseClient;
+    try {
+      const { data } = await sb.from('rooms')
+        .select('game_state, sim_state, status')
+        .eq('id', currentRoom.id)
+        .single();
+      return data;
+    } catch (e) { console.error('loadGameStateFromDB:', e); return null; }
+  }
+
   // Host broadcasts game state (new player, sold, unsold, etc.)
   function broadcastGameState(event, payload) {
     if (!realtimeChannel) return;
@@ -275,6 +310,19 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onHumanTurn) Lobby.callbacks.onHumanTurn(payload);
     });
 
+    // Centralized simulation broadcasts (host → all)
+    realtimeChannel.on('broadcast', { event: 'sim_match_result' }, ({ payload }) => {
+      if (Lobby.callbacks.onSimMatchResult) Lobby.callbacks.onSimMatchResult(payload);
+    });
+
+    realtimeChannel.on('broadcast', { event: 'sim_playoffs_setup' }, ({ payload }) => {
+      if (Lobby.callbacks.onSimPlayoffsSetup) Lobby.callbacks.onSimPlayoffsSetup(payload);
+    });
+
+    realtimeChannel.on('broadcast', { event: 'sim_champion' }, ({ payload }) => {
+      if (Lobby.callbacks.onSimChampion) Lobby.callbacks.onSimChampion(payload);
+    });
+
     realtimeChannel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         const u = Auth.getUser();
@@ -353,6 +401,7 @@ window.Lobby = (function() {
     createRoom, joinRoom, leaveRoom, pickTeam, toggleReady, startAuction,
     sendBid, sendPass, sendPause, broadcastGameState,
     getRoomPlayers, getActiveRooms, getRoom, isHost, rejoinIfInRoom,
+    saveGameStateToDB, saveSimStateToDB, loadGameStateFromDB,
     callbacks: {}
   };
 })();

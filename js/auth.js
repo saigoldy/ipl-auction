@@ -122,5 +122,60 @@ window.Auth = (function() {
     }
   }
 
-  return { init, signUp, signIn, signInWithGoogle, signOut, getUser, getProfile, showAuthScreen, showApp, updateUserDisplay };
+  // ===== DB-BACKED SAVED GAMES (logged-in users only) =====
+
+  async function saveGameToDB(saveData) {
+    if (!currentUser) return false;
+    const sb = window.supabaseClient;
+    try {
+      // Upsert (one save per user)
+      await sb.from('saved_games').upsert({
+        user_id: currentUser.id,
+        phase: saveData.phase,
+        team_states: saveData.teamStates,
+        team_ownership: saveData.teamOwnership,
+        user_xi_selections: saveData.userXISelections || {},
+        tournament: saveData.tournament,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'user_id' });
+      return true;
+    } catch (e) {
+      console.error('saveGameToDB:', e);
+      return false;
+    }
+  }
+
+  async function loadGameFromDB() {
+    if (!currentUser) return null;
+    const sb = window.supabaseClient;
+    try {
+      const { data } = await sb.from('saved_games')
+        .select('*')
+        .eq('user_id', currentUser.id)
+        .single();
+      if (!data) return null;
+      return {
+        timestamp: new Date(data.saved_at || data.updated_at).getTime(),
+        phase: data.phase,
+        teamStates: data.team_states,
+        teamOwnership: data.team_ownership,
+        userXISelections: data.user_xi_selections || {},
+        tournament: data.tournament
+      };
+    } catch (e) { return null; }
+  }
+
+  async function clearGameFromDB() {
+    if (!currentUser) return;
+    const sb = window.supabaseClient;
+    try {
+      await sb.from('saved_games').delete().eq('user_id', currentUser.id);
+    } catch (e) { console.error('clearGameFromDB:', e); }
+  }
+
+  return {
+    init, signUp, signIn, signInWithGoogle, signOut, getUser, getProfile,
+    showAuthScreen, showApp, updateUserDisplay,
+    saveGameToDB, loadGameFromDB, clearGameFromDB
+  };
 })();

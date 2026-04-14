@@ -157,6 +157,8 @@
       </div>
       <button class="btn btn-pause" id="btn-pause" onclick="App.togglePause()">⏸ PAUSE</button>
       <button class="btn btn-simulate" id="btn-simulate" onclick="App.simulateAuction()">⚡ SIMULATE ALL</button>
+      <button class="btn btn-audio-chat" id="btn-audio-chat" onclick="handleAudioToggle()" style="display:none;background:#7C4DFF;color:#fff;padding:8px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer">🎙️ Join Voice</button>
+      <span id="audio-status" style="font-size:11px;color:var(--text-dim);margin-left:8px"></span>
     </div>
     <div class="auction-main">
       <!-- Left: Current Player -->
@@ -297,6 +299,7 @@
   <script src="js/simulation.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/lobby.js"></script>
+  <script src="js/audio-chat.js"></script>
   <script src="js/app.js"></script>
   <script>
     // ===== AUTH HANDLERS =====
@@ -559,6 +562,9 @@
       const currentUser = Auth.getUser();
       window.onlineMode = true;
       AuctionEngine.setOnlineTimer(true);
+      // Show audio chat button
+      const audioBtn = document.getElementById('btn-audio-chat');
+      if (audioBtn) audioBtn.style.display = '';
 
       // Build humanTeams — use cached room players as primary source
       // This avoids async race conditions
@@ -619,10 +625,13 @@
       AuctionEngine.on('sold', (player, teamId, price) => {
         if (orig.onSold) orig.onSold(player, teamId, price);
         Lobby.broadcastGameState('sold', { player, teamId, price, ...snap() });
+        // Persist room state to DB after each sold (for refresh resilience)
+        persistRoomState();
       });
       AuctionEngine.on('unsold', (player) => {
         if (orig.onUnsold) orig.onUnsold(player);
         Lobby.broadcastGameState('unsold', { player, ...snap() });
+        persistRoomState();
       });
       AuctionEngine.on('timerUpdate', (remaining) => {
         if (orig.onTimerUpdate) orig.onTimerUpdate(remaining);
@@ -661,6 +670,76 @@
           AuctionEngine.humanPass(payload.teamId);
         }
       };
+
+      // ===== #10: AI takeover when player disconnects =====
+      // Track which user owns which team
+      let teamUserMap = {}; // teamId -> userId
+      Lobby.getRoomPlayers().then(players => {
+        players.forEach(p => { if (p.team_id) teamUserMap[p.team_id] = p.user_id; });
+      });
+
+      Lobby.callbacks.onPresenceSync = (presenceState) => {
+        // presenceState is { userId: [{ user_id, ... }], ... }
+        const onlineUserIds = new Set();
+        Object.values(presenceState || {}).forEach(arr => {
+          arr.forEach(p => { if (p.user_id) onlineUserIds.add(p.user_id); });
+        });
+
+        // For each human team, check if owner is online
+        const states = AuctionEngine.getAllTeamStates();
+        Object.entries(teamUserMap).forEach(([teamId, userId]) => {
+          const ts = states[teamId];
+          if (!ts) return;
+          const isOnline = onlineUserIds.has(userId);
+          // If owner offline, mark team as AI temporarily
+          if (!isOnline && ts.isHuman) {
+            ts.isHuman = false;
+            ts._humanTakenOver = true; // flag to restore later
+            console.log(`AI taken over for ${teamId} (player offline)`);
+            Lobby.broadcastGameState('log', { msg: `🤖 AI takes over ${teamId} (player disconnected)`, type: 'dramatic' });
+          } else if (isOnline && ts._humanTakenOver) {
+            ts.isHuman = true;
+            ts._humanTakenOver = false;
+            console.log(`${teamId} owner reconnected, control restored`);
+            Lobby.broadcastGameState('log', { msg: `🎮 ${teamId} owner reconnected`, type: 'dramatic' });
+          }
+        });
+      };
+    }
+
+    // ===== AUDIO CHAT HANDLER =====
+    async function handleAudioToggle() {
+      const room = Lobby.getRoom();
+      const user = Auth.getUser();
+      if (!room || !user) { alert('Not in a room'); return; }
+      if (!AudioChat.isActive()) {
+        await AudioChat.start(room.id, user.id);
+      } else {
+        AudioChat.toggleMute();
+      }
+    }
+
+    // Save room state to DB (host only, throttled)
+    let _persistTimer = null;
+    function persistRoomState() {
+      if (!Lobby.isHost()) return;
+      if (_persistTimer) clearTimeout(_persistTimer);
+      _persistTimer = setTimeout(() => {
+        const st = AuctionEngine.getState();
+        if (!st) return;
+        const snapshot = {
+          currentIndex: st.currentIndex,
+          currentBid: st.currentBid,
+          currentBidder: st.currentBidder,
+          phase: st.phase,
+          round: st.round,
+          teamStates: AuctionEngine.getAllTeamStates(),
+          soldPlayers: st.soldPlayers,
+          unsoldPlayers: st.unsoldPlayers,
+          humanTeams: st.humanTeams
+        };
+        Lobby.saveGameStateToDB(snapshot);
+      }, 1000); // throttle: at most once per second
     }
 
     function wireClientListeners() {
@@ -675,6 +754,11 @@
       // Also listen for log and humanTurn
       Lobby.callbacks.onLog = (payload) => App.handleOnlineEvent('log', payload);
       Lobby.callbacks.onHumanTurn = (payload) => App.handleOnlineEvent('human_turn', payload);
+
+      // Centralized simulation events
+      Lobby.callbacks.onSimMatchResult = (payload) => App.handleOnlineEvent('sim_match_result', payload);
+      Lobby.callbacks.onSimPlayoffsSetup = (payload) => App.handleOnlineEvent('sim_playoffs_setup', payload);
+      Lobby.callbacks.onSimChampion = (payload) => App.handleOnlineEvent('sim_champion', payload);
     }
 
     async function handleRejoinRoom() {
@@ -784,6 +868,36 @@
                   App.startAuctionWithTeams(ht, myTeamId, true);
                   wireRoomCallbacks();
                   wireClientListeners();
+
+                  // Restore game state from DB snapshot
+                  const stateData = await Lobby.loadGameStateFromDB();
+                  if (stateData && stateData.game_state) {
+                    const gs = stateData.game_state;
+                    AuctionEngine.syncState({
+                      currentBid: gs.currentBid,
+                      currentBidder: gs.currentBidder,
+                      currentIndex: gs.currentIndex,
+                      phase: gs.phase
+                    });
+                    // Restore team squads from snapshot
+                    if (gs.teamStates) {
+                      const localStates = AuctionEngine.getAllTeamStates();
+                      Object.entries(gs.teamStates).forEach(([tid, saved]) => {
+                        if (localStates[tid]) {
+                          localStates[tid].budget = saved.budget;
+                          localStates[tid].squad = saved.squad || [];
+                          localStates[tid].filled = saved.filled || 0;
+                          localStates[tid].roleCount = saved.roleCount;
+                          localStates[tid].subRoleCount = saved.subRoleCount;
+                          localStates[tid].overseasCount = saved.overseasCount || 0;
+                          localStates[tid].overseasByRole = saved.overseasByRole;
+                        }
+                      });
+                    }
+                    document.getElementById('auction-player-num').textContent = (gs.currentIndex || 0) + 1;
+                    document.getElementById('auction-phase').textContent = gs.phase || '';
+                    console.log('Restored auction state from DB');
+                  }
                 } else {
                   // Room is in waiting/picking_teams — show room screen
                   showRoomScreen(room);
