@@ -124,6 +124,16 @@
         <div class="info-card"><span class="info-num">₹125 Cr</span><span class="info-label">Per Team</span></div>
         <div class="info-card"><span class="info-num">200+</span><span class="info-label">Players</span></div>
       </div>
+      <!-- Active online room banner (shows on refresh if in a room) -->
+      <div id="active-room-banner" style="display:none;background:rgba(124,77,255,0.15);border:2px solid #7C4DFF;border-radius:10px;padding:16px;margin:16px auto;max-width:600px;text-align:center">
+        <div style="font-weight:bold;font-size:16px;margin-bottom:8px">🎮 You have an active online room</div>
+        <div id="active-room-info" style="font-size:13px;color:var(--text-dim);margin-bottom:12px"></div>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="confirmRejoin()">Rejoin Room</button>
+          <button class="btn btn-secondary" onclick="confirmLeaveRoom()" style="background:#444">Leave Room</button>
+        </div>
+      </div>
+
       <div style="display:flex;gap:16px;justify-content:center;flex-wrap:wrap">
         <button class="btn btn-primary btn-large" id="btn-resume-game" onclick="App.resumeOfflineGame()" style="display:none">▶ Resume Saved Game</button>
         <button class="btn btn-primary btn-large" id="btn-play-online" onclick="App.showScreen('lobby')" style="display:none">Play Online</button>
@@ -845,6 +855,105 @@
       };
     }
 
+    // ===== ACTIVE ROOM BANNER (opt-in rejoin on refresh) =====
+    let _detectedActiveRoom = null;
+
+    async function detectActiveRoomForBanner() {
+      const sb = window.supabaseClient;
+      const user = Auth.getUser();
+      if (!user) return;
+
+      const { data: myEntries } = await sb.from('room_players')
+        .select('room_id').eq('user_id', user.id);
+      if (!myEntries || myEntries.length === 0) return;
+
+      for (const entry of myEntries) {
+        const { data: rooms } = await sb.from('rooms')
+          .select('*').eq('id', entry.room_id)
+          .in('status', ['waiting', 'picking_teams', 'auction', 'simulation']);
+        if (rooms && rooms.length > 0) {
+          _detectedActiveRoom = rooms[0];
+          const banner = document.getElementById('active-room-banner');
+          const info = document.getElementById('active-room-info');
+          if (banner) banner.style.display = '';
+          if (info) {
+            const statusLabel = {
+              'waiting': 'Waiting for players',
+              'picking_teams': 'Team selection',
+              'auction': 'Auction in progress',
+              'simulation': 'Tournament running'
+            }[_detectedActiveRoom.status] || _detectedActiveRoom.status;
+            info.innerHTML = `Room <strong style="color:var(--gold)">${_detectedActiveRoom.code}</strong> — ${statusLabel}`;
+          }
+          return;
+        }
+      }
+    }
+
+    async function confirmRejoin() {
+      if (!_detectedActiveRoom) { alert('No active room found'); return; }
+      const room = _detectedActiveRoom;
+      const user = Auth.getUser();
+
+      // Set currentRoom in Lobby and subscribe
+      await Lobby.rejoinIfInRoom();
+
+      if (room.status === 'auction') {
+        const players = await Lobby.getRoomPlayers();
+        cachedRoomPlayers = players || [];
+        const myTeamId = players.find(p => p.user_id === user.id)?.team_id || null;
+        const ht = buildHumanTeamsFromPlayers(players);
+        window.onlineMode = true;
+        AuctionEngine.setOnlineTimer(true);
+
+        const isHostUser = room.host_id === user.id;
+        App.startAuctionWithTeams(ht, myTeamId, !isHostUser);
+        wireRoomCallbacks();
+        if (isHostUser) {
+          wireHostBroadcasts();
+        } else {
+          wireClientListeners();
+          setTimeout(() => requestStateFromHost(), 1500);
+        }
+
+        // Try to restore from DB if available
+        try {
+          const stateData = await Lobby.loadGameStateFromDB();
+          if (stateData && stateData.game_state) {
+            const gs = stateData.game_state;
+            AuctionEngine.syncState({
+              currentBid: gs.currentBid,
+              currentBidder: gs.currentBidder,
+              currentIndex: gs.currentIndex,
+              phase: gs.phase
+            });
+            if (gs.teamStates) {
+              const localStates = AuctionEngine.getAllTeamStates();
+              Object.entries(gs.teamStates).forEach(([tid, saved]) => {
+                if (localStates[tid]) Object.assign(localStates[tid], saved);
+              });
+            }
+          }
+        } catch (e) { console.error('DB restore:', e); }
+      } else {
+        showRoomScreen(room);
+      }
+      const banner = document.getElementById('active-room-banner');
+      if (banner) banner.style.display = 'none';
+    }
+
+    async function confirmLeaveRoom() {
+      if (!confirm('Leave this room? You will not be able to rejoin without the room code.')) return;
+      try {
+        const sb = window.supabaseClient;
+        const user = Auth.getUser();
+        if (sb && user) await sb.from('room_players').delete().eq('user_id', user.id);
+      } catch (e) { console.error('Leave error:', e); }
+      const banner = document.getElementById('active-room-banner');
+      if (banner) banner.style.display = 'none';
+      _detectedActiveRoom = null;
+    }
+
     // Non-host requests current state from host (used after rejoin)
     function requestStateFromHost() {
       const myId = Auth.getUser()?.id;
@@ -943,69 +1052,10 @@
             Auth.showApp();
             document.getElementById('btn-play-online').style.display = '';
 
-            // Auto-rejoin room if user was in one (handles page refresh/disconnect)
+            // Detect active room and show banner (NO auto-rejoin)
             try {
-              const room = await Lobby.rejoinIfInRoom();
-              if (room) {
-                if (room.status === 'auction') {
-                  console.log('Rejoining in-progress auction...');
-                  const players = await Lobby.getRoomPlayers();
-                  cachedRoomPlayers = players || [];
-                  const myTeamId = players.find(p => p.user_id === user.id)?.team_id || null;
-                  const ht = buildHumanTeamsFromPlayers(players);
-
-                  window.onlineMode = true;
-                  AuctionEngine.setOnlineTimer(true);
-
-                  const isHostUser = room.host_id === user.id;
-                  // Host: restart engine and continue. Non-host: client mode + request state.
-                  App.startAuctionWithTeams(ht, myTeamId, !isHostUser);
-                  wireRoomCallbacks();
-                  if (isHostUser) {
-                    wireHostBroadcasts();
-                    alert('Welcome back, host! Your auction is being restored. State will resync.');
-                  } else {
-                    wireClientListeners();
-                    setTimeout(() => requestStateFromHost(), 1500);
-                  }
-
-                  // Also try DB snapshot as fallback
-                  const stateData = await Lobby.loadGameStateFromDB();
-                  if (stateData && stateData.game_state) {
-                    const gs = stateData.game_state;
-                    AuctionEngine.syncState({
-                      currentBid: gs.currentBid,
-                      currentBidder: gs.currentBidder,
-                      currentIndex: gs.currentIndex,
-                      phase: gs.phase
-                    });
-                    // Restore team squads from snapshot
-                    if (gs.teamStates) {
-                      const localStates = AuctionEngine.getAllTeamStates();
-                      Object.entries(gs.teamStates).forEach(([tid, saved]) => {
-                        if (localStates[tid]) {
-                          localStates[tid].budget = saved.budget;
-                          localStates[tid].squad = saved.squad || [];
-                          localStates[tid].filled = saved.filled || 0;
-                          localStates[tid].roleCount = saved.roleCount;
-                          localStates[tid].subRoleCount = saved.subRoleCount;
-                          localStates[tid].overseasCount = saved.overseasCount || 0;
-                          localStates[tid].overseasByRole = saved.overseasByRole;
-                        }
-                      });
-                    }
-                    document.getElementById('auction-player-num').textContent = (gs.currentIndex || 0) + 1;
-                    document.getElementById('auction-phase').textContent = gs.phase || '';
-                    console.log('Restored auction state from DB');
-                  }
-                } else {
-                  // Room is in waiting/picking_teams — show room screen
-                  showRoomScreen(room);
-                }
-              }
-            } catch (rejoinErr) {
-              console.error('Room rejoin failed:', rejoinErr);
-            }
+              await detectActiveRoomForBanner();
+            } catch (e) { console.error('Active room detect:', e); }
           }
         } else {
           playOffline();
