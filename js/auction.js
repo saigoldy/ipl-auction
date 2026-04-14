@@ -766,12 +766,39 @@ window.AuctionEngine = (function() {
       if (maxBid > extraCap) maxBid = extraCap;
     }
 
-    // Stars get extra boost regardless of phase (everyone wants top players)
-    if (player.starPower >= 85 && needScore >= 40) {
-      maxBid *= 1.25;
+    // ===== TIERED SPENDING STRATEGY =====
+    // Stars: aggressive (where the money goes)
+    // Average: value picks (don't overpay)
+    // Young/potential: bidding wars OK
+    // Occasional bluff overpay for variety
+
+    const isStar = player.starPower >= 80;
+    const isMidTier = player.starPower >= 50 && player.starPower < 80;
+    const isAverage = player.starPower >= 30 && player.starPower < 50;
+    const hasPotential = player.age <= 24 || player.hiddenGem;
+
+    // Star player: big spend allowed if needed
+    if (isStar && needScore >= 40) {
+      maxBid *= 1.4; // strong boost for stars in needed roles
     }
-    if (player.starPower >= 70 && needScore >= 30) {
-      maxBid *= 1.15;
+    if (player.starPower >= 90 && needScore >= 50) {
+      maxBid *= 1.3; // marquee elite — extra layer
+    }
+
+    // Young potential / hidden gem: bidding war boost (3-5x base possible)
+    if (hasPotential && needScore >= 30) {
+      maxBid *= 1.3;
+    }
+
+    // Average player: keep value-conscious (no big boost)
+    // Only mild boost if genuine high-need
+    if (isAverage && needScore >= 60) {
+      maxBid *= 1.1;
+    }
+
+    // BLUFF OVERPAY (10% chance on average players — causes chaos)
+    if (isAverage && Math.random() < 0.10) {
+      maxBid *= 1.5; // accidentally overpay
     }
 
     // Late auction urgency: must grab remaining players
@@ -780,30 +807,29 @@ window.AuctionEngine = (function() {
       maxBid *= 1.5;
     }
 
-    // ===== BURN-THE-BUDGET BOOST =====
-    // If team has lots of budget left late in auction, bid aggressively
-    // Real IPL teams almost always spend 90%+ of their purse
+    // ===== BURN-THE-BUDGET (only on stars + needed players, not average) =====
     const auctionPct = state.currentIndex / state.playerPool.length;
     const budgetUsedPct = 1 - (ts.budget / 12500);
 
-    // Budget unspent vs auction progress mismatch
-    if (auctionPct > 0.5 && budgetUsedPct < 0.4 && needScore >= 25) {
-      // Halfway done, spent <40% — start spending more aggressively
-      maxBid *= 1.5;
+    if (auctionPct > 0.5 && budgetUsedPct < 0.4) {
+      // Halfway, spent <40% → boost ONLY for stars or high-need
+      if (isStar || needScore >= 60) maxBid *= 1.4;
     }
-    if (auctionPct > 0.7 && budgetUsedPct < 0.6 && needScore >= 20) {
-      // 70% done, still <60% spent — splurge on remaining picks
-      maxBid *= 2.0;
+    if (auctionPct > 0.7 && budgetUsedPct < 0.5) {
+      // Late, spent <50% → broader boost
+      if (player.starPower >= 50 || needScore >= 40) maxBid *= 1.6;
     }
     if (auctionPct > 0.85 && ts.budget > 3000) {
-      // Final stretch with >30 Cr unspent — burn it
-      maxBid *= 2.5;
+      // Final stretch with >30 Cr unspent — burn on quality picks
+      if (player.starPower >= 40 || needScore >= 30) maxBid *= 2.0;
     }
-    // Also boost if team has reached 18 and still has plenty of budget for 25
+
+    // Reached 18 with budget left: extras can go higher if quality
     if (reachedMin && optionalSlotsLeft > 0 && ts.budget > 2000) {
       const targetSpendPerExtra = ts.budget / Math.max(1, optionalSlotsLeft);
-      // Allow bidding up to 2.5x average for extras
-      const extraBoostCap = targetSpendPerExtra * 2.5;
+      // Stars: up to 3x avg | Mid: 2x avg | Average: 1.2x avg
+      const tierMult = isStar ? 3.0 : isMidTier ? 2.0 : 1.2;
+      const extraBoostCap = targetSpendPerExtra * tierMult;
       if (maxBid < extraBoostCap && needScore >= 30) {
         maxBid = Math.max(maxBid, extraBoostCap);
       }
