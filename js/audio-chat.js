@@ -3,17 +3,22 @@ window.AudioChat = (function() {
   let localStream = null;
   let peers = {}; // userId -> RTCPeerConnection
   let remoteAudios = {}; // userId -> HTMLAudioElement
-  let isMuted = true;
+  let isMuted = false; // start UNMUTED (user explicitly enabled mic)
   let isActive = false;
   let signalChannel = null;
   let myId = null;
+  let reannounceInterval = null;
 
   const ICE_SERVERS = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
       { urls: 'stun:stun2.l.google.com:19302' },
-      { urls: 'stun:stun3.l.google.com:19302' }
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      // Free public TURN (Twilio-style fallback for restrictive networks)
+      { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+      { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' }
     ]
   };
 
@@ -24,11 +29,14 @@ window.AudioChat = (function() {
     isActive = true;
 
     try {
-      // Get microphone (start muted)
+      // Get microphone (start UNMUTED — user explicitly enabled chat)
       console.log('[audio] Requesting microphone...');
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      localStream.getAudioTracks().forEach(t => t.enabled = false); // muted by default
-      console.log('[audio] Microphone acquired (muted)');
+      localStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false
+      });
+      localStream.getAudioTracks().forEach(t => t.enabled = true); // start unmuted
+      console.log('[audio] Microphone acquired (UNMUTED)');
 
       // Set up signaling channel
       const sb = window.supabaseClient;
@@ -45,15 +53,31 @@ window.AudioChat = (function() {
       await signalChannel.subscribe();
       console.log('[audio] Signaling channel subscribed');
 
-      // Wait a moment then announce arrival
-      setTimeout(() => {
+      // Announce arrival immediately + re-announce every 3 seconds for first 15s
+      // This handles the case where peers subscribe at slightly different times
+      const announce = () => {
         signalChannel.send({
           type: 'broadcast',
           event: 'webrtc_join',
           payload: { from: myId }
         });
         console.log('[audio] Announced join to room');
-      }, 500);
+      };
+
+      // Initial announce
+      setTimeout(announce, 200);
+
+      // Re-announce every 3s for 15s, then stop
+      let rounds = 0;
+      reannounceInterval = setInterval(() => {
+        rounds++;
+        if (rounds >= 5 || Object.keys(peers).length > 0) {
+          clearInterval(reannounceInterval);
+          reannounceInterval = null;
+          return;
+        }
+        announce();
+      }, 3000);
 
       updateUI();
       return true;
@@ -67,6 +91,10 @@ window.AudioChat = (function() {
 
   function stop() {
     if (!isActive) return;
+    if (reannounceInterval) {
+      clearInterval(reannounceInterval);
+      reannounceInterval = null;
+    }
     if (signalChannel) {
       signalChannel.send({
         type: 'broadcast',
@@ -104,7 +132,8 @@ window.AudioChat = (function() {
   // ===== WebRTC Signaling =====
 
   // When a new peer joins, the existing peer creates an offer
-  // Use deterministic offerer: the LOWER userId creates the offer (avoids both creating offers)
+  // Use deterministic offerer: the LOWER userId creates the offer
+  const _seenJoinFrom = new Set();
   async function handleJoin({ from }) {
     if (from === myId) return;
     if (peers[from]) return;
@@ -112,15 +141,16 @@ window.AudioChat = (function() {
     // Lower userId = offerer (deterministic to avoid race conditions)
     if (myId < from) {
       await createPeerAndOffer(from);
-    } else {
-      // The other peer will offer; just wait for it
-      // But also send a "join" back so they know I'm here (in case they joined before me)
+    } else if (!_seenJoinFrom.has(from)) {
+      // First time seeing this peer — send ONE join back so they know I'm here
+      _seenJoinFrom.add(from);
       signalChannel.send({
         type: 'broadcast',
         event: 'webrtc_join',
         payload: { from: myId }
       });
     }
+    // else: already responded, just wait for offer
   }
 
   function handleLeave({ from }) {
@@ -283,11 +313,11 @@ window.AudioChat = (function() {
       btn.textContent = '🎙️ Join Voice';
       btn.style.background = '#7C4DFF';
     } else if (isMuted) {
-      btn.textContent = '🎙️ Unmute';
-      btn.style.background = '#666';
+      btn.textContent = '🔇 Unmute';
+      btn.style.background = '#888';
     } else {
-      btn.textContent = '🔊 Mute';
-      btn.style.background = 'var(--green)';
+      btn.textContent = '🎙️ Mute';
+      btn.style.background = '#4CAF50';
     }
     const count = Object.keys(remoteAudios).length;
     const status = document.getElementById('audio-status');
@@ -295,11 +325,11 @@ window.AudioChat = (function() {
       if (!isActive) {
         status.textContent = '';
       } else if (count === 0) {
-        status.textContent = 'Waiting for others to join voice...';
+        status.textContent = '⏳ Waiting for others to join voice...';
         status.style.color = '#ffa726';
       } else {
-        status.textContent = `🔊 ${count} player(s) connected`;
-        status.style.color = 'var(--green)';
+        status.textContent = `🔊 ${count} other(s) on voice ${isMuted ? '(you muted)' : '(LIVE)'}`;
+        status.style.color = isMuted ? '#888' : '#4CAF50';
       }
     }
   }
