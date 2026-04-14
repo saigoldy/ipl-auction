@@ -671,6 +671,27 @@
         }
       };
 
+      // Respond to client resync requests
+      Lobby.callbacks.onRequestState = (payload) => {
+        if (!payload || payload.from === Auth.getUser()?.id) return;
+        const st = AuctionEngine.getState();
+        if (!st) return;
+        const snapshot = {
+          to: payload.from,
+          currentPlayer: st.currentPlayer,
+          currentIndex: st.currentIndex,
+          currentBid: st.currentBid,
+          currentBidder: st.currentBidder,
+          phase: st.phase,
+          round: st.round,
+          totalPlayers: st.playerPool ? st.playerPool.length : 0,
+          teamStates: AuctionEngine.getAllTeamStates(),
+          isActive: st.isActive
+        };
+        Lobby.broadcastGameState('state_snapshot', snapshot);
+        console.log('HOST sent resync snapshot to', payload.from);
+      };
+
       // ===== #10: AI takeover when player disconnects =====
       // Track which user owns which team
       let teamUserMap = {}; // teamId -> userId
@@ -759,6 +780,39 @@
       Lobby.callbacks.onSimMatchResult = (payload) => App.handleOnlineEvent('sim_match_result', payload);
       Lobby.callbacks.onSimPlayoffsSetup = (payload) => App.handleOnlineEvent('sim_playoffs_setup', payload);
       Lobby.callbacks.onSimChampion = (payload) => App.handleOnlineEvent('sim_champion', payload);
+
+      // State snapshot from host (response to my resync request)
+      Lobby.callbacks.onStateSnapshot = (payload) => {
+        const myId = Auth.getUser()?.id;
+        if (!payload || payload.to !== myId) return; // not for me
+        console.log('CLIENT received state snapshot from host');
+        // Apply state
+        AuctionEngine.syncState({
+          currentPlayer: payload.currentPlayer,
+          currentIndex: payload.currentIndex,
+          currentBid: payload.currentBid,
+          currentBidder: payload.currentBidder,
+          phase: payload.phase,
+          isActive: payload.isActive
+        });
+        if (payload.teamStates) {
+          const localStates = AuctionEngine.getAllTeamStates();
+          Object.entries(payload.teamStates).forEach(([tid, saved]) => {
+            if (localStates[tid]) Object.assign(localStates[tid], saved);
+          });
+        }
+        // Re-render
+        if (payload.currentPlayer) App.handleOnlineEvent('new_player', { player: payload.currentPlayer, currentIndex: payload.currentIndex, phase: payload.phase, total: payload.totalPlayers });
+        if (payload.currentBidder) App.handleOnlineEvent('bid_update', { teamId: payload.currentBidder, amount: payload.currentBid });
+      };
+    }
+
+    // Non-host requests current state from host (used after rejoin)
+    function requestStateFromHost() {
+      const myId = Auth.getUser()?.id;
+      if (!myId) return;
+      Lobby.broadcastGameState('request_state', { from: myId });
+      console.log('CLIENT requested state resync from host');
     }
 
     async function handleRejoinRoom() {
@@ -869,7 +923,10 @@
                   wireRoomCallbacks();
                   wireClientListeners();
 
-                  // Restore game state from DB snapshot
+                  // Request current state from host (works without DB migration)
+                  setTimeout(() => requestStateFromHost(), 1500);
+
+                  // Also try DB snapshot as fallback
                   const stateData = await Lobby.loadGameStateFromDB();
                   if (stateData && stateData.game_state) {
                     const gs = stateData.game_state;

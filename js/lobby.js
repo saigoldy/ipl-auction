@@ -323,6 +323,16 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onSimChampion) Lobby.callbacks.onSimChampion(payload);
     });
 
+    // Resync: client requests current state from host
+    realtimeChannel.on('broadcast', { event: 'request_state' }, ({ payload }) => {
+      if (Lobby.callbacks.onRequestState) Lobby.callbacks.onRequestState(payload);
+    });
+
+    // Host responds with full state snapshot
+    realtimeChannel.on('broadcast', { event: 'state_snapshot' }, ({ payload }) => {
+      if (Lobby.callbacks.onStateSnapshot) Lobby.callbacks.onStateSnapshot(payload);
+    });
+
     realtimeChannel.subscribe(async (status) => {
       if (status === 'SUBSCRIBED') {
         const u = Auth.getUser();
