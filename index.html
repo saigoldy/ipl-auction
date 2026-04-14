@@ -748,12 +748,21 @@
     // ===== LEAVE ROOM FROM AUCTION =====
     async function handleLeaveAuction() {
       if (!confirm('Leave the room? You can rejoin later from the lobby.')) return;
+      // Stop audio chat first
+      try { if (window.AudioChat && AudioChat.isActive()) AudioChat.stop(); } catch (e) {}
+      // Try to leave (don't block on error)
+      try { await Lobby.leaveRoom(); } catch (e) { console.error('Leave error:', e); }
+      window.onlineMode = false;
+      // Clear any saved state for this user
       try {
-        if (window.AudioChat && AudioChat.isActive()) AudioChat.stop();
-        await Lobby.leaveRoom();
-        window.onlineMode = false;
-        location.reload(); // clean reset
-      } catch (e) { alert('Leave error: ' + e.message); }
+        const sb = window.supabaseClient;
+        const user = Auth.getUser();
+        if (sb && user) {
+          await sb.from('room_players').delete().eq('user_id', user.id);
+        }
+      } catch (e) { console.error('Cleanup error:', e); }
+      // Always reload regardless of errors
+      location.reload();
     }
 
     // Show/hide Simulate All based on number of human players in room

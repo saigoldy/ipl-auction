@@ -67,14 +67,28 @@ window.Lobby = (function() {
 
   // Leave room
   async function leaveRoom() {
-    if (!currentRoom) return;
     const sb = window.supabaseClient;
     const user = Auth.getUser();
 
-    await sb.from('room_players').delete().eq('room_id', currentRoom.id).eq('user_id', user.id);
+    // If we have currentRoom, try to delete from DB
+    if (currentRoom && user) {
+      try {
+        await sb.from('room_players').delete().eq('room_id', currentRoom.id).eq('user_id', user.id);
+      } catch (e) {
+        console.error('leaveRoom DB delete failed:', e);
+      }
+    } else if (user) {
+      // No currentRoom but we may still have orphaned room_players entries
+      try {
+        await sb.from('room_players').delete().eq('user_id', user.id);
+      } catch (e) {
+        console.error('leaveRoom orphan cleanup failed:', e);
+      }
+    }
 
+    // Always clean up local state
     if (realtimeChannel) {
-      sb.removeChannel(realtimeChannel);
+      try { sb.removeChannel(realtimeChannel); } catch (e) {}
       realtimeChannel = null;
     }
     currentRoom = null;
