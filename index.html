@@ -825,8 +825,10 @@
       Lobby.callbacks.onHumanTurn = (payload) => App.handleOnlineEvent('human_turn', payload);
 
       // Centralized simulation events
+      Lobby.callbacks.onSimInit = (payload) => App.handleOnlineEvent('sim_init', payload);
       Lobby.callbacks.onSimMatchResult = (payload) => App.handleOnlineEvent('sim_match_result', payload);
       Lobby.callbacks.onSimPlayoffsSetup = (payload) => App.handleOnlineEvent('sim_playoffs_setup', payload);
+      Lobby.callbacks.onSimPlayoffResult = (payload) => App.handleOnlineEvent('sim_playoff_result', payload);
       Lobby.callbacks.onSimChampion = (payload) => App.handleOnlineEvent('sim_champion', payload);
 
       // State snapshot from host (response to my resync request)

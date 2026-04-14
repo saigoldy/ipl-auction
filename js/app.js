@@ -927,9 +927,33 @@ window.App = (function() {
   // ===== TOURNAMENT =====
   function startTournament() {
     const states = AuctionEngine.getAllTeamStates();
+
+    // In online mode, only HOST initializes the schedule
+    // Non-hosts wait for the host to broadcast the schedule
+    if (window.onlineMode && window.Lobby && !Lobby.isHost()) {
+      // Non-host: don't init local schedule, wait for sim_init from host
+      console.log('Non-host: waiting for host to start tournament');
+      showScreen('tournament');
+      // Render placeholder
+      const cont = document.getElementById('match-counter');
+      if (cont) cont.textContent = 'Waiting for host to start...';
+      return;
+    }
+
     SimulationEngine.init(states);
     showScreen('tournament');
     renderPointsTable();
+
+    // HOST: broadcast the tournament initialization (schedule + initial state)
+    if (window.onlineMode && window.Lobby && Lobby.isHost()) {
+      const simState = SimulationEngine.getState();
+      Lobby.broadcastGameState('sim_init', {
+        schedule: simState.schedule,
+        standings: simState.standings,
+        playerForms: simState.playerForms,
+        teamStates: states
+      });
+    }
   }
 
   function simNext() {
@@ -973,9 +997,22 @@ window.App = (function() {
   }
 
   function simFive() {
+    if (window.onlineMode && window.Lobby && !Lobby.isHost()) {
+      console.log('Non-host: cannot advance simulation');
+      return;
+    }
     for (let i = 0; i < 5; i++) {
       if (SimulationEngine.isLeagueComplete()) break;
-      SimulationEngine.simulateNextMatch();
+      const result = SimulationEngine.simulateNextMatch();
+      // Broadcast each match result in online mode
+      if (result && window.onlineMode && window.Lobby) {
+        const st = SimulationEngine.getState();
+        Lobby.broadcastGameState('sim_match_result', {
+          result: result,
+          standings: st.standings,
+          currentMatch: st.currentMatch
+        });
+      }
     }
     const state = SimulationEngine.getState();
     const last = state.completedMatches[state.completedMatches.length - 1];
@@ -990,17 +1027,32 @@ window.App = (function() {
   }
 
   function simAll() {
+    if (window.onlineMode && window.Lobby && !Lobby.isHost()) {
+      console.log('Non-host: cannot advance simulation');
+      return;
+    }
     const state = SimulationEngine.getState();
     if (SimulationEngine.isLeagueComplete()) {
       if (!state.playoffs) {
         SimulationEngine.setupPlayoffs();
         renderPlayoffs();
+        if (window.onlineMode && window.Lobby) {
+          Lobby.broadcastGameState('sim_playoffs_setup', { playoffs: state.playoffs });
+        }
       }
       return;
     }
 
     while (!SimulationEngine.isLeagueComplete()) {
-      SimulationEngine.simulateNextMatch();
+      const result = SimulationEngine.simulateNextMatch();
+      // Broadcast every match in online mode
+      if (result && window.onlineMode && window.Lobby) {
+        Lobby.broadcastGameState('sim_match_result', {
+          result: result,
+          standings: state.standings,
+          currentMatch: state.currentMatch
+        });
+      }
     }
     const last = state.completedMatches[state.completedMatches.length - 1];
     if (last) renderMatchResult(last);
@@ -1127,6 +1179,10 @@ window.App = (function() {
   }
 
   function simNextPlayoff() {
+    if (window.onlineMode && window.Lobby && !Lobby.isHost()) {
+      console.log('Non-host: cannot advance playoffs');
+      return;
+    }
     if (playoffIdx >= playoffOrder.length) return;
 
     const key = playoffOrder[playoffIdx];
@@ -1137,7 +1193,19 @@ window.App = (function() {
       updateBracketUI();
 
       const state = SimulationEngine.getState();
+
+      // Broadcast playoff result + bracket state to non-host clients
+      if (window.onlineMode && window.Lobby) {
+        Lobby.broadcastGameState('sim_playoff_result', {
+          key, result, playoffs: state.playoffs, playoffIdx
+        });
+      }
+
       if (state.champion) {
+        // Broadcast champion to non-host clients
+        if (window.onlineMode && window.Lobby) {
+          Lobby.broadcastGameState('sim_champion', { champion: state.champion });
+        }
         setTimeout(() => showResult(), 3000);
       }
     }
@@ -1318,6 +1386,40 @@ window.App = (function() {
       case 'auction_end':
         onAuctionEnd();
         break;
+      case 'sim_init':
+        // Non-host receives the tournament schedule from host
+        if (payload.schedule) {
+          // Initialize SimulationEngine with HOST's data (same schedule for everyone)
+          const localStates = AuctionEngine.getAllTeamStates();
+          // Merge team states from host (so squads match)
+          if (payload.teamStates) {
+            Object.entries(payload.teamStates).forEach(([tid, saved]) => {
+              if (localStates[tid]) {
+                localStates[tid].budget = saved.budget;
+                localStates[tid].squad = saved.squad;
+                localStates[tid].filled = saved.filled;
+                localStates[tid].roleCount = saved.roleCount;
+                localStates[tid].subRoleCount = saved.subRoleCount;
+                localStates[tid].overseasCount = saved.overseasCount;
+              }
+            });
+          }
+          SimulationEngine.init(localStates);
+          // Override schedule and initial state with host's
+          const simState = SimulationEngine.getState();
+          if (simState) {
+            simState.schedule = payload.schedule;
+            simState.standings = payload.standings;
+            simState.playerForms = payload.playerForms;
+            simState.completedMatches = [];
+            simState.currentMatch = 0;
+          }
+          renderPointsTable();
+          const matchCounter = document.getElementById('match-counter');
+          if (matchCounter) matchCounter.textContent = `Match 1 of ${payload.schedule.length}`;
+          console.log('[SIM] Tournament initialized from host');
+        }
+        break;
       case 'sim_match_result':
         // Non-host receives a simulated match from host
         if (payload.result) {
@@ -1326,7 +1428,12 @@ window.App = (function() {
             simState.completedMatches = simState.completedMatches || [];
             simState.completedMatches.push(payload.result);
             simState.currentMatch = payload.currentMatch;
-            if (payload.standings) Object.assign(simState.standings, payload.standings);
+            if (payload.standings) {
+              // Replace standings entirely (not merge) to stay in sync
+              Object.keys(payload.standings).forEach(tid => {
+                simState.standings[tid] = payload.standings[tid];
+              });
+            }
           }
           if (typeof renderMatchResult === 'function') renderMatchResult(payload.result);
           if (typeof renderPointsTable === 'function') renderPointsTable();
@@ -1337,6 +1444,17 @@ window.App = (function() {
           const simState = SimulationEngine.getState();
           if (simState) simState.playoffs = payload.playoffs;
           if (typeof renderPlayoffs === 'function') renderPlayoffs();
+        }
+        break;
+      case 'sim_playoff_result':
+        if (payload.result) {
+          const simState = SimulationEngine.getState();
+          if (simState) {
+            if (payload.playoffs) simState.playoffs = payload.playoffs;
+            if (payload.playoffIdx !== undefined) playoffIdx = payload.playoffIdx;
+          }
+          if (typeof renderMatchResult === 'function') renderMatchResult(payload.result);
+          if (typeof updateBracketUI === 'function') updateBracketUI();
         }
         break;
       case 'sim_champion':

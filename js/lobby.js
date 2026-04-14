@@ -337,6 +337,14 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onSimChampion) Lobby.callbacks.onSimChampion(payload);
     });
 
+    realtimeChannel.on('broadcast', { event: 'sim_init' }, ({ payload }) => {
+      if (Lobby.callbacks.onSimInit) Lobby.callbacks.onSimInit(payload);
+    });
+
+    realtimeChannel.on('broadcast', { event: 'sim_playoff_result' }, ({ payload }) => {
+      if (Lobby.callbacks.onSimPlayoffResult) Lobby.callbacks.onSimPlayoffResult(payload);
+    });
+
     // Resync: client requests current state from host
     realtimeChannel.on('broadcast', { event: 'request_state' }, ({ payload }) => {
       if (Lobby.callbacks.onRequestState) Lobby.callbacks.onRequestState(payload);
