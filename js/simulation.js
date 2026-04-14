@@ -225,7 +225,7 @@ window.SimulationEngine = (function() {
     if (innings2.totalRuns >= adjustedTarget) {
       winner = bowlingFirst;
       margin = `${10 - innings2.wickets} wickets`;
-      const oversLeft = ((120 - innings2.ballsBowled) / 6).toFixed(1);
+      const oversLeft = formatOvers(120 - innings2.ballsBowled);
       margin += ` (${oversLeft} overs left)`;
       keyMoments.push({ text: `${TEAMS.find(t=>t.id===winner).shortName} win by ${margin}!`, highlight: true });
     } else if (innings2.totalRuns < innings1.totalRuns) {
@@ -385,6 +385,13 @@ window.SimulationEngine = (function() {
     };
   }
 
+  // Convert balls to cricket overs notation (e.g. 118 balls = "19.4")
+  function formatOvers(balls) {
+    const completeOvers = Math.floor(balls / 6);
+    const remainingBalls = balls % 6;
+    return remainingBalls === 0 ? `${completeOvers}.0` : `${completeOvers}.${remainingBalls}`;
+  }
+
   function ratePlayer(p) {
     const form = tournament.playerForms[p.id];
     const formMod = form ? form.currentForm / 70 : 1;
@@ -542,32 +549,39 @@ window.SimulationEngine = (function() {
 
   // Sort playing 11 into a realistic batting order
   function sortBattingOrder(players) {
-    // Batting position priority based on subRole and role
+    // STRICT batting position based on role + batting stat
+    // Pure bowlers (role='bowler') ALWAYS bat at #9-11 regardless of subRole
     function getBattingPosition(p) {
       const sub = p.subRole;
       const role = p.role;
+      const bat = p.stats.batting || 0;
 
-      // 1-3: Openers and top-order batters/WK-batters
-      if (sub === 'top-order') return 1 + (100 - p.stats.batting) / 100; // best top-order first
-      if (sub === 'wk-batter' && p.stats.batting >= 75) return 2; // WK who can bat well opens/bats 3
+      // Hard rule: pure bowlers ALWAYS at 9-11, sorted by batting (best bat first)
+      if (role === 'bowler') return 900 - bat;
 
-      // 3-5: Middle-order batters
-      if (sub === 'middle-order') return 4 + (100 - p.stats.batting) / 100;
-      if (sub === 'wk-batter') return 4.5; // WK with lower batting in middle
+      // Wicketkeepers — sorted by batting ability
+      if (role === 'wicketkeeper') {
+        if (bat >= 75) return 200 - bat; // good WK-batter opens or bats 3
+        return 450 - bat; // weaker WK at #4-5
+      }
 
-      // 5-7: Finishers and batting all-rounders
-      if (sub === 'finisher') return 5.5 + (100 - p.stats.batting) / 100;
-      if (sub === 'batting-ar') return 6 + (100 - p.stats.batting) / 100;
+      // Pure batters
+      if (role === 'batter') {
+        if (sub === 'top-order') return 100 - bat; // openers and #3
+        if (sub === 'middle-order') return 400 - bat;
+        if (sub === 'finisher') return 600 - bat;
+        return 350 - bat; // unknown subRole batter
+      }
 
-      // 7-8: Bowling all-rounders (can bat a bit)
-      if (sub === 'bowling-ar') return 7.5 + (100 - p.stats.batting) / 100;
-      if (role === 'allRounder') return 7 + (100 - p.stats.batting) / 100;
+      // All-rounders
+      if (role === 'allRounder') {
+        if (sub === 'batting-ar' && bat >= 65) return 500 - bat; // batting AR at #5-6
+        if (sub === 'batting-ar') return 650 - bat; // weaker bat AR at #6-7
+        if (sub === 'bowling-ar') return 750 - bat; // bowling AR at #7-8
+        return 700 - bat;
+      }
 
-      // 8-11: Pure bowlers — sorted by batting ability (best batting bowler highest)
-      if (role === 'bowler') return 9 + (100 - p.stats.batting) / 100;
-
-      // Fallback
-      return 8;
+      return 800; // unknown
     }
 
     return players.sort((a, b) => getBattingPosition(a) - getBattingPosition(b));
@@ -724,7 +738,7 @@ window.SimulationEngine = (function() {
     // Chase narrative
     if (target) {
       if (totalRuns >= target) {
-        keyMoments.push({ text: `Target chased! ${totalRuns}/${wickets} in ${(ballsBowled/6).toFixed(1)} overs`, highlight: true });
+        keyMoments.push({ text: `Target chased! ${totalRuns}/${wickets} in ${formatOvers(ballsBowled)} overs`, highlight: true });
       } else {
         keyMoments.push({ text: `All out / Overs done: ${totalRuns}/${wickets}. Fell short by ${target - totalRuns - 1} runs.`, highlight: false });
       }
@@ -1227,6 +1241,6 @@ window.SimulationEngine = (function() {
   return {
     init, getState, simulateNextMatch, getSortedStandings,
     isLeagueComplete, setupPlayoffs, simulatePlayoffMatch,
-    getTopPerformers, VENUES
+    getTopPerformers, VENUES, formatOvers
   };
 })();

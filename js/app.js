@@ -789,8 +789,8 @@ window.App = (function() {
 
     // Impact player panel — show 4 substitutes, highlight selected impact
     const impactGrid = document.getElementById('xi-impact-grid');
-    const nonStarters = squad.filter(p => !sel.starters.includes(p.id));
-    const subs = nonStarters.slice(0, Math.min(4, nonStarters.length));
+    // Show ALL non-starters as potential impact picks (was limited to 4)
+    const subs = squad.filter(p => !sel.starters.includes(p.id));
     const overseasInXI = starterPlayers.filter(p => p.isOverseas).length;
 
     impactGrid.innerHTML = subs.length === 0
@@ -1014,8 +1014,8 @@ window.App = (function() {
       </div>
 
       <div class="match-score">
-        <div>${battingFirstTeam.shortName}: <strong>${result.innings1.totalRuns}/${result.innings1.wickets}</strong> (${(result.innings1.ballsBowled/6).toFixed(1)} ov)</div>
-        <div>${bowlingFirstTeam.shortName}: <strong>${result.innings2.totalRuns}/${result.innings2.wickets}</strong> (${(result.innings2.ballsBowled/6).toFixed(1)} ov)</div>
+        <div>${battingFirstTeam.shortName}: <strong>${result.innings1.totalRuns}/${result.innings1.wickets}</strong> (${SimulationEngine.formatOvers(result.innings1.ballsBowled)} ov)</div>
+        <div>${bowlingFirstTeam.shortName}: <strong>${result.innings2.totalRuns}/${result.innings2.wickets}</strong> (${SimulationEngine.formatOvers(result.innings2.ballsBowled)} ov)</div>
       </div>
 
       <div class="match-winner" style="color:${winnerTeam.colors.primary}">
@@ -1055,7 +1055,7 @@ window.App = (function() {
   }
 
   function renderScorecard(innings, teamName) {
-    let html = `<div class="scorecard-section"><h4>${teamName} Innings: ${innings.totalRuns}/${innings.wickets} (${(innings.ballsBowled/6).toFixed(1)} ov)</h4>`;
+    let html = `<div class="scorecard-section"><h4>${teamName} Innings: ${innings.totalRuns}/${innings.wickets} (${SimulationEngine.formatOvers(innings.ballsBowled)} ov)</h4>`;
 
     html += '<table class="scorecard-table"><thead><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr></thead><tbody>';
     innings.batting.forEach(b => {

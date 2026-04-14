@@ -277,7 +277,8 @@ window.AuctionEngine = (function() {
       if (team.id === state.currentBidder) return;
       if (ts.filled >= 25) return;
 
-      const nextBid = state.currentBid + getIncrement(state.currentBid);
+      // First bid = base price, subsequent = current + increment
+      const nextBid = state.currentBidder ? state.currentBid + getIncrement(state.currentBid) : state.currentBid;
       if (!canAfford(team.id, nextBid)) return;
 
       const eval_ = evaluateBid(team, state.currentPlayer, nextBid);
@@ -287,10 +288,10 @@ window.AuctionEngine = (function() {
         const delay = 800 + Math.random() * 3500;
         const timeout = setTimeout(() => {
           if (!state.isActive) return;
-          if (state.teamStates[team.id].isHuman) return; // double-check: never bid for humans
+          if (state.teamStates[team.id].isHuman) return;
           if (team.id === state.currentBidder) return;
 
-          const currentNext = state.currentBid + getIncrement(state.currentBid);
+          const currentNext = state.currentBidder ? state.currentBid + getIncrement(state.currentBid) : state.currentBid;
           const reeval = evaluateBid(team, state.currentPlayer, currentNext);
           if (reeval.willBid && currentNext <= reeval.maxBid && canAfford(team.id, currentNext)) {
             placeBidInternal(team.id, currentNext, reeval.isBluff);
@@ -304,12 +305,14 @@ window.AuctionEngine = (function() {
 
   function humanBid(teamId) {
     if (!state.isActive) return;
-    const newBid = state.currentBid + getIncrement(state.currentBid);
+    // First bid = base price; subsequent bids = current + increment
+    const newBid = state.currentBidder
+      ? state.currentBid + getIncrement(state.currentBid)
+      : state.currentBid; // base price
     if (!canAfford(teamId, newBid)) return;
     if (!canBuyPlayer(teamId, state.currentPlayer)) return;
 
     placeBidInternal(teamId, newBid, false, true); // fromHuman=true
-    // Reset countdown — new bid came in
     resetCountdown();
   }
 
@@ -948,7 +951,7 @@ window.AuctionEngine = (function() {
           if (ts.filled >= 25) continue;
           if (team.id === state.currentBidder) continue;
 
-          const nextBid = state.currentBid + getIncrement(state.currentBid);
+          const nextBid = state.currentBidder ? state.currentBid + getIncrement(state.currentBid) : state.currentBid;
           if (!canAfford(team.id, nextBid)) continue;
 
           const eval_ = evaluateBid(team, player, nextBid);
