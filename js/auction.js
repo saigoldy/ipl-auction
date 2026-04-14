@@ -377,6 +377,18 @@ window.AuctionEngine = (function() {
       log(`⚡ BIDDING WAR! ${warTeams.map(([id]) => TEAMS.find(t => t.id === id).shortName).join(' vs ')}!`, 'dramatic');
     }
 
+    // CHAOS MODE: 4+ unique bidders
+    const uniqueBidders = Object.keys(state.bidWars).length;
+    if (uniqueBidders >= 4 && state.bidHistory.length === uniqueBidders) {
+      log(`🔥 ${uniqueBidders} TEAMS BIDDING for ${state.currentPlayer.name}! This is going to get crazy!`, 'dramatic');
+    }
+    if (uniqueBidders >= 5 && amount > 1500) {
+      log(`💥 INSANE! ${state.currentPlayer.name} now at ${formatPrice(amount)}! ${uniqueBidders}-team war!`, 'dramatic');
+    }
+    if (amount >= 2500) {
+      log(`🤯 RECORD-BREAKING bid! ${formatPrice(amount)} for ${state.currentPlayer.name}!`, 'dramatic');
+    }
+
     log(msg, ts.isHuman ? 'dramatic' : '');
     if (state.callbacks.onBid) state.callbacks.onBid(teamId, amount);
   }
@@ -411,26 +423,36 @@ window.AuctionEngine = (function() {
     LSG:  { paceBoost: 1.10, spinBoost: 0.95, youthBoost: 1.20, eldersBoost: 0.85, oldOverseasPenalty: 0.6 }
   };
 
-  // Realistic max bid based on player tier (IPL-grounded, generous)
-  // Real IPL bidding wars often go 5-10x base for marquee players
+  // Realistic max bid based on player tier + bidding war intensity
+  // 5+ teams competing = chaos mode, can reach 25+ Cr for top stars
   function getRealisticMaxBid(player) {
     const star = player.starPower;
     const age = player.age;
 
-    // Marquee elite (star 90+) — can go up to 5x base in bidding wars
-    if (star >= 90) return player.basePrice * 5.0;
-    // Top stars (80-89) — up to 4x
-    if (star >= 80) return player.basePrice * 4.0;
-    // Mid-tier (60-79) — up to 3x
-    if (star >= 60) return player.basePrice * 3.0;
-    // Decent (40-59) — up to 2.5x
-    if (star >= 40) return player.basePrice * 2.5;
-    // Budget (20-39) — up to 2x
-    if (star >= 20) return player.basePrice * 2.0;
-    // Uncapped/young hidden gems — major auction wars
-    if (age <= 23 && player.hiddenGem) return player.basePrice * 6.0;
-    // Default low-tier
-    return player.basePrice * 1.8;
+    // Count distinct bidders on current player (war intensity)
+    const distinctBidders = state && state.bidWars ? Object.keys(state.bidWars).length : 0;
+
+    // Base multiplier by tier
+    let multiplier;
+    if (star >= 90) multiplier = 6.0;            // Marquee elite
+    else if (star >= 80) multiplier = 5.0;       // Top stars
+    else if (star >= 60) multiplier = 3.5;       // Mid-tier
+    else if (star >= 40) multiplier = 2.5;       // Decent
+    else if (star >= 20) multiplier = 2.0;       // Budget
+    else if (age <= 23 && player.hiddenGem) multiplier = 7.0; // Young gems
+    else multiplier = 1.8;
+
+    // BIDDING WAR INTENSITY MULTIPLIER (the chaos factor)
+    let warMultiplier = 1.0;
+    if (distinctBidders >= 5) warMultiplier = 2.5;       // 5+ teams = pure chaos
+    else if (distinctBidders >= 4) warMultiplier = 1.8;  // 4 teams = heated
+    else if (distinctBidders >= 3) warMultiplier = 1.4;  // 3 teams = competitive
+    else if (distinctBidders >= 2) warMultiplier = 1.15; // 2 teams = mild boost
+
+    // For top stars, no upper cap — bidding war can take it to 25+ Cr
+    // For others, slight ceiling to prevent absurd prices
+    const maxAllowed = star >= 80 ? 9999 : (player.basePrice * multiplier * warMultiplier);
+    return Math.min(player.basePrice * multiplier * warMultiplier, maxAllowed === 9999 ? 99999 : maxAllowed);
   }
 
   function evaluateBid(team, player, bidAmount) {
@@ -766,12 +788,21 @@ window.AuctionEngine = (function() {
       if (maxBid > extraCap) maxBid = extraCap;
     }
 
-    // ===== TIERED SPENDING STRATEGY =====
-    // Stars: aggressive (where the money goes)
-    // Average: value picks (don't overpay)
-    // Young/potential: bidding wars OK
-    // Occasional bluff overpay for variety
+    // ===== BIDDING WAR INTENSITY (chaos mode when many teams compete) =====
+    const distinctBiddersCount = state.bidWars ? Object.keys(state.bidWars).length : 0;
+    let warBoost = 1.0;
+    if (distinctBiddersCount >= 5) {
+      warBoost = 2.0; // 5+ teams = chaos, anything goes
+    } else if (distinctBiddersCount >= 4) {
+      warBoost = 1.6;
+    } else if (distinctBiddersCount >= 3) {
+      warBoost = 1.3;
+    }
+    if (warBoost > 1.0) {
+      maxBid *= warBoost;
+    }
 
+    // ===== TIERED SPENDING STRATEGY =====
     const isStar = player.starPower >= 80;
     const isMidTier = player.starPower >= 50 && player.starPower < 80;
     const isAverage = player.starPower >= 30 && player.starPower < 50;
