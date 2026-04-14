@@ -929,12 +929,10 @@ window.App = (function() {
     const states = AuctionEngine.getAllTeamStates();
 
     // In online mode, only HOST initializes the schedule
-    // Non-hosts wait for the host to broadcast the schedule
     if (window.onlineMode && window.Lobby && !Lobby.isHost()) {
-      // Non-host: don't init local schedule, wait for sim_init from host
       console.log('Non-host: waiting for host to start tournament');
       showScreen('tournament');
-      // Render placeholder
+      hideSimButtonsForNonHost();
       const cont = document.getElementById('match-counter');
       if (cont) cont.textContent = 'Waiting for host to start...';
       return;
@@ -944,7 +942,7 @@ window.App = (function() {
     showScreen('tournament');
     renderPointsTable();
 
-    // HOST: broadcast the tournament initialization (schedule + initial state)
+    // HOST: broadcast the tournament initialization
     if (window.onlineMode && window.Lobby && Lobby.isHost()) {
       const simState = SimulationEngine.getState();
       Lobby.broadcastGameState('sim_init', {
@@ -953,6 +951,25 @@ window.App = (function() {
         playerForms: simState.playerForms,
         teamStates: states
       });
+    }
+  }
+
+  // Hide simulate buttons in tournament screen for non-host players
+  function hideSimButtonsForNonHost() {
+    if (!window.onlineMode || !window.Lobby) return;
+    if (Lobby.isHost()) return;
+    ['btn-sim-next', 'btn-sim-five', 'btn-sim-all'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    // Show waiting message instead
+    const controls = document.querySelector('.sim-controls');
+    if (controls && !document.getElementById('non-host-sim-msg')) {
+      const msg = document.createElement('div');
+      msg.id = 'non-host-sim-msg';
+      msg.style.cssText = 'color:var(--text-dim);font-style:italic;padding:8px';
+      msg.textContent = '⏳ Waiting for host to advance the tournament...';
+      controls.appendChild(msg);
     }
   }
 

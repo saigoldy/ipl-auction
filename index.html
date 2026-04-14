@@ -775,7 +775,7 @@
       location.reload();
     }
 
-    // Show/hide Simulate All based on number of human players in room
+    // Show/hide Simulate All based on host status
     function updateSimulateButtonVisibility() {
       const simBtn = document.getElementById('btn-simulate');
       if (!simBtn) return;
@@ -783,9 +783,8 @@
         simBtn.style.display = ''; // always show offline
         return;
       }
-      // Online: hide if more than 2 human players in the room
-      const humanCount = Object.keys(onlineHumanTeams || {}).length;
-      simBtn.style.display = humanCount > 2 ? 'none' : '';
+      // Online: only HOST sees the Simulate All button
+      simBtn.style.display = Lobby.isHost() ? '' : 'none';
     }
 
     // Save room state to DB (host only, throttled)
@@ -823,6 +822,23 @@
       // Also listen for log and humanTurn
       Lobby.callbacks.onLog = (payload) => App.handleOnlineEvent('log', payload);
       Lobby.callbacks.onHumanTurn = (payload) => App.handleOnlineEvent('human_turn', payload);
+
+      // Host transfer notification
+      Lobby.callbacks.onHostChanged = (payload) => {
+        if (!payload || !payload.newHostId) return;
+        const room = Lobby.getRoom();
+        if (room) room.host_id = payload.newHostId; // update local cache
+        const myId = Auth.getUser()?.id;
+        if (myId === payload.newHostId) {
+          alert('🎮 You are now the HOST! Old host left the room.');
+          // Re-wire as host
+          if (window.onlineMode && window.AuctionEngine) {
+            try { wireHostBroadcasts(); } catch (e) {}
+          }
+        }
+        // Update simulate button visibility
+        if (typeof updateSimulateButtonVisibility === 'function') updateSimulateButtonVisibility();
+      };
 
       // Centralized simulation events
       Lobby.callbacks.onSimInit = (payload) => App.handleOnlineEvent('sim_init', payload);

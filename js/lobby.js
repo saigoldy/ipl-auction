@@ -70,6 +70,32 @@ window.Lobby = (function() {
     const sb = window.supabaseClient;
     const user = Auth.getUser();
 
+    // If we're the host, transfer host role to another player BEFORE leaving
+    if (currentRoom && user && currentRoom.host_id === user.id) {
+      try {
+        const { data: otherPlayers } = await sb.from('room_players')
+          .select('user_id')
+          .eq('room_id', currentRoom.id)
+          .neq('user_id', user.id);
+        if (otherPlayers && otherPlayers.length > 0) {
+          // Pick random other player as new host
+          const newHost = otherPlayers[Math.floor(Math.random() * otherPlayers.length)];
+          await sb.from('rooms').update({ host_id: newHost.user_id }).eq('id', currentRoom.id);
+          // Broadcast host change
+          if (realtimeChannel) {
+            realtimeChannel.send({
+              type: 'broadcast',
+              event: 'host_changed',
+              payload: { newHostId: newHost.user_id }
+            });
+          }
+          console.log('Host transferred to', newHost.user_id);
+        }
+      } catch (e) {
+        console.error('Host transfer failed:', e);
+      }
+    }
+
     // If we have currentRoom, try to delete from DB
     if (currentRoom && user) {
       try {
@@ -78,7 +104,6 @@ window.Lobby = (function() {
         console.error('leaveRoom DB delete failed:', e);
       }
     } else if (user) {
-      // No currentRoom but we may still have orphaned room_players entries
       try {
         await sb.from('room_players').delete().eq('user_id', user.id);
       } catch (e) {
@@ -339,6 +364,10 @@ window.Lobby = (function() {
 
     realtimeChannel.on('broadcast', { event: 'sim_init' }, ({ payload }) => {
       if (Lobby.callbacks.onSimInit) Lobby.callbacks.onSimInit(payload);
+    });
+
+    realtimeChannel.on('broadcast', { event: 'host_changed' }, ({ payload }) => {
+      if (Lobby.callbacks.onHostChanged) Lobby.callbacks.onHostChanged(payload);
     });
 
     realtimeChannel.on('broadcast', { event: 'sim_playoff_result' }, ({ payload }) => {
