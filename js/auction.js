@@ -543,6 +543,7 @@ window.AuctionEngine = (function() {
     // This way 3-5 teams still compete on good players, but saturated teams mostly skip.
 
     const budgetPct = bidAmount / ts.budget;
+    const subCount = src[player.subRole] || 0; // moved up (was declared later, causing TDZ error)
     const roleKey = role === 'batter' ? 'batters' : role === 'bowler' ? 'bowlers' : role === 'allRounder' ? 'allRounders' : 'wicketkeepers';
     const needLevel = rc[role] < needs[roleKey].min ? 'high'
       : rc[role] < needs[roleKey].max ? 'medium' : 'low';
@@ -593,8 +594,7 @@ window.AuctionEngine = (function() {
       if (ts.overseasCount >= 7 && needLevel === 'low' && Math.random() < 0.9) return { willBid: false };
     }
 
-    // 4. Sub-role saturation: probabilistic skips
-    const subCount = src[player.subRole] || 0;
+    // 4. Sub-role saturation: probabilistic skips (subCount declared above)
     if (!isDesperate) {
       // Oversaturated positions: 70% chance to skip
       if (player.subRole === 'top-order' && subCount >= 3 && Math.random() < 0.7) return { willBid: false };

@@ -195,21 +195,32 @@ window.SimulationEngine = (function() {
     const strengthDiff = Math.abs(teamAStrength - teamBStrength);
 
     let underdogBoost = null;
-    // Upset probability scales — weaker teams CAN beat stronger ones
-    // In real IPL, even bottom teams beat top teams ~30-35% of the time
+    // LUCK + FORM FACTOR — higher upset probability for realistic IPL chaos
+    // Real IPL: bottom teams beat top teams ~35-40% of the time
     if (strengthDiff > 80) {
-      // Very one-sided on paper: 25% upset chance
-      if (Math.random() < 0.25) underdogBoost = teamAStrength < teamBStrength ? teamAId : teamBId;
-    } else if (strengthDiff > 40) {
-      // Moderate gap: 35% upset chance
+      // Very one-sided: 35% upset chance (was 25%)
       if (Math.random() < 0.35) underdogBoost = teamAStrength < teamBStrength ? teamAId : teamBId;
+    } else if (strengthDiff > 40) {
+      // Moderate gap: 45% upset chance (was 35%)
+      if (Math.random() < 0.45) underdogBoost = teamAStrength < teamBStrength ? teamAId : teamBId;
     } else {
-      // Close match: 45% either team boost (really 50/50)
-      if (Math.random() < 0.45) underdogBoost = Math.random() > 0.5 ? teamAId : teamBId;
+      // Close match: 50/50 — either team can win
+      if (Math.random() < 0.5) underdogBoost = Math.random() > 0.5 ? teamAId : teamBId;
+    }
+    // Additional "team of the day" luck factor — any team can have a hot day (10%)
+    if (!underdogBoost && Math.random() < 0.10) {
+      underdogBoost = Math.random() > 0.5 ? teamAId : teamBId;
     }
     if (underdogBoost) {
       const name = TEAMS.find(t => t.id === underdogBoost).shortName;
-      keyMoments.push({ text: `💪 ${name} come in with confidence today!`, highlight: true });
+      const messages = [
+        `💪 ${name} come in with confidence today!`,
+        `🔥 ${name} are on fire today!`,
+        `⚡ ${name} look red-hot in warm-ups!`,
+        `🌟 ${name} have the stars aligned today!`,
+        `🎯 ${name} are feeling lucky!`
+      ];
+      keyMoments.push({ text: messages[Math.floor(Math.random() * messages.length)], highlight: true });
     }
 
     // Simulate innings
@@ -408,8 +419,8 @@ window.SimulationEngine = (function() {
     const form = tournament.playerForms[p.id];
     const formMod = form ? form.currentForm / 70 : 1;
     const primary = p.role === 'bowler' ? p.stats.bowling : p.role === 'allRounder' ? (p.stats.batting + p.stats.bowling) / 2 : p.stats.batting;
-    // Add small random factor so ratings aren't deterministic
-    const randomMod = 0.95 + Math.random() * 0.1; // ±5%
+    // Wider random factor for day-to-day variance (±10%)
+    const randomMod = 0.90 + Math.random() * 0.2;
     return primary * formMod * randomMod;
   }
 

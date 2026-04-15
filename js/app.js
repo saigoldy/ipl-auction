@@ -345,6 +345,10 @@ window.App = (function() {
       showBidControlsForAllHumans();
     }
 
+    // Hide value meter for new player
+    const meter = document.getElementById('value-meter');
+    if (meter) meter.style.display = 'none';
+
     // Re-animate player card
     const card = document.getElementById('player-card');
     card.style.animation = 'none';
@@ -364,9 +368,55 @@ window.App = (function() {
     teamEl.textContent = team.name;
     teamEl.style.color = team.colors.primary;
 
+    updateValueMeter(amount);
     renderTeamBudgetBar();
     renderSquadContent();
-    showBidControlsForAllHumans(); // refresh bid button amount and state
+    showBidControlsForAllHumans();
+  }
+
+  // Compute "fair price" for the current player and update the meter
+  function updateValueMeter(currentBid) {
+    const state = AuctionEngine.getState();
+    const player = state && state.currentPlayer;
+    const meter = document.getElementById('value-meter');
+    const indicator = document.getElementById('value-meter-indicator');
+    const label = document.getElementById('value-meter-label');
+    if (!player || !meter || !indicator || !label) return;
+
+    // Fair price = base × tier multiplier (realistic expectation)
+    const star = player.starPower;
+    let fairMultiplier;
+    if (star >= 95) fairMultiplier = 4.5;
+    else if (star >= 90) fairMultiplier = 3.5;
+    else if (star >= 80) fairMultiplier = 2.5;
+    else if (star >= 60) fairMultiplier = 1.8;
+    else if (star >= 40) fairMultiplier = 1.4;
+    else if (star >= 20) fairMultiplier = 1.15;
+    else if (player.age <= 23 && player.hiddenGem) fairMultiplier = 3.0;
+    else fairMultiplier = 1.1;
+
+    const fairPrice = player.basePrice * fairMultiplier;
+    const ratio = currentBid / fairPrice; // 1.0 = exactly fair
+
+    meter.style.display = '';
+
+    // Map ratio to 0-100% position
+    // 0% (steal) = ratio <= 0.6, 50% (fair) = ratio 1.0, 100% (overpaid) = ratio >= 1.5
+    let pct;
+    if (ratio <= 0.6) pct = 0;
+    else if (ratio >= 1.5) pct = 100;
+    else pct = ((ratio - 0.6) / 0.9) * 100;
+
+    indicator.style.left = `calc(${pct}% - 2px)`;
+
+    let text, color;
+    if (ratio < 0.8) { text = '💎 STEAL!'; color = '#4CAF50'; }
+    else if (ratio < 1.1) { text = '✅ Fair Value'; color = '#8BC34A'; }
+    else if (ratio < 1.3) { text = '👍 Reasonable'; color = '#FFC107'; }
+    else if (ratio < 1.6) { text = '⚠️ Getting Expensive'; color = '#FF9800'; }
+    else { text = '🔥 Overpaid!'; color = '#f44336'; }
+    label.textContent = text + ' (Fair: ' + AuctionEngine.formatPrice(fairPrice) + ')';
+    label.style.color = color;
   }
 
   function onSold(player, teamId, price) {
