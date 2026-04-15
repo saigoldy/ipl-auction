@@ -417,55 +417,68 @@ window.SimulationEngine = (function() {
       return !form || !form.isInjured;
     });
 
-    // Must pick max 4 overseas in starting XI
-    const indians = available.filter(p => !p.isOverseas);
-    const overseas = available.filter(p => p.isOverseas);
-
-    overseas.sort((a, b) => ratePlayer(b) - ratePlayer(a));
-    indians.sort((a, b) => ratePlayer(b) - ratePlayer(a));
+    // ROLE-BASED XI SELECTION (not just rating)
+    // Target: 1 WK + 4-5 batters + 2 all-rounders + 4 bowlers = 11
+    const byRole = {
+      wicketkeeper: available.filter(p => p.role === 'wicketkeeper'),
+      batter: available.filter(p => p.role === 'batter'),
+      allRounder: available.filter(p => p.role === 'allRounder'),
+      bowler: available.filter(p => p.role === 'bowler')
+    };
+    // Sort each by rating
+    Object.keys(byRole).forEach(k => byRole[k].sort((a, b) => ratePlayer(b) - ratePlayer(a)));
 
     const selected = [];
-    const overseasPick = overseas.slice(0, 4); // max 4 overseas
-    selected.push(...overseasPick);
+    const pickedIds = new Set();
 
-    // Fill remaining 7 with best Indians, ensuring role balance
-    let remaining = 11 - selected.length;
-    const indianPool = [...indians];
-
-    // Ensure at least 1 WK
-    const hasWK = selected.some(p => p.role === 'wicketkeeper');
-    if (!hasWK) {
-      const wk = indianPool.find(p => p.role === 'wicketkeeper');
-      if (wk) {
-        selected.push(wk);
-        indianPool.splice(indianPool.indexOf(wk), 1);
-        remaining--;
-      }
+    function tryPick(player) {
+      if (!player || pickedIds.has(player.id)) return false;
+      // Overseas check
+      const overseasCount = selected.filter(p => p.isOverseas).length;
+      if (player.isOverseas && overseasCount >= 4) return false;
+      selected.push(player);
+      pickedIds.add(player.id);
+      return true;
     }
 
-    // Ensure at least 5 bowlers/allrounders who can bowl
-    const canBowl = selected.filter(p => p.role === 'bowler' || p.role === 'allRounder' || (p.bowlingStyle && p.stats.bowling > 25));
-    let bowlersNeeded = Math.max(0, 5 - canBowl.length);
-    while (bowlersNeeded > 0 && remaining > 0 && indianPool.length > 0) {
-      const bowler = indianPool.find(p => p.role === 'bowler' || p.role === 'allRounder');
-      if (bowler) {
-        selected.push(bowler);
-        indianPool.splice(indianPool.indexOf(bowler), 1);
-        remaining--;
-        bowlersNeeded--;
-      } else break;
+    // 1. Pick 1 WK (best available)
+    if (byRole.wicketkeeper[0]) tryPick(byRole.wicketkeeper[0]);
+
+    // 2. Pick 4 bowlers (best available, prefer variety pace+spin)
+    let bowlersPicked = 0;
+    for (const p of byRole.bowler) {
+      if (bowlersPicked >= 4) break;
+      if (tryPick(p)) bowlersPicked++;
     }
 
-    // Fill rest by rating
-    for (let i = 0; i < remaining && indianPool.length > 0; i++) {
-      selected.push(indianPool.shift());
+    // 3. Pick 2 all-rounders
+    let arPicked = 0;
+    for (const p of byRole.allRounder) {
+      if (arPicked >= 2) break;
+      if (tryPick(p)) arPicked++;
     }
 
-    // If still < 11, add any available
-    while (selected.length < 11 && available.length > selected.length) {
-      const rest = available.filter(p => !selected.includes(p));
-      if (rest.length > 0) selected.push(rest[0]);
-      else break;
+    // 4. Pick 4 batters (need openers + middle-order)
+    const topOrderB = byRole.batter.filter(p => p.subRole === 'top-order');
+    const middleOrderB = byRole.batter.filter(p => p.subRole === 'middle-order');
+    const finisherB = byRole.batter.filter(p => p.subRole === 'finisher');
+    const otherB = byRole.batter.filter(p => !['top-order','middle-order','finisher'].includes(p.subRole));
+    // 2 top-order, 1 middle, 1 finisher (or best available)
+    let battersPicked = 0;
+    for (const p of topOrderB) { if (battersPicked >= 2) break; if (tryPick(p)) battersPicked++; }
+    for (const p of middleOrderB) { if (battersPicked >= 3) break; if (tryPick(p)) battersPicked++; }
+    for (const p of finisherB) { if (battersPicked >= 4) break; if (tryPick(p)) battersPicked++; }
+    // Fallback: any batter
+    for (const p of [...topOrderB, ...middleOrderB, ...finisherB, ...otherB]) {
+      if (battersPicked >= 4) break;
+      if (tryPick(p)) battersPicked++;
+    }
+
+    // 5. Fill remaining slots with best available (role-agnostic)
+    const allRanked = available.slice().sort((a, b) => ratePlayer(b) - ratePlayer(a));
+    for (const p of allRanked) {
+      if (selected.length >= 11) break;
+      tryPick(p);
     }
 
     // === IMPACT PLAYER SELECTION ===
@@ -547,44 +560,79 @@ window.SimulationEngine = (function() {
     return scored[0].bowler;
   }
 
-  // Sort playing 11 into a realistic batting order
+  // Sort playing 11 into a realistic batting order — BULLETPROOF
+  // Uses explicit tiers: bowlers always last, batters first
   function sortBattingOrder(players) {
-    // STRICT batting position based on role + batting stat
-    // Pure bowlers (role='bowler') ALWAYS bat at #9-11 regardless of subRole
-    function getBattingPosition(p) {
-      const sub = p.subRole;
+    // Split by role into separate buckets
+    const pureBatters = [];
+    const wicketkeepers = [];
+    const allRounders = [];
+    const pureBowlers = [];
+
+    players.forEach(p => {
       const role = p.role;
-      const bat = p.stats.batting || 0;
+      if (role === 'bowler') pureBowlers.push(p);
+      else if (role === 'wicketkeeper') wicketkeepers.push(p);
+      else if (role === 'allRounder') allRounders.push(p);
+      else if (role === 'batter') pureBatters.push(p);
+      else pureBatters.push(p); // unknown → treat as batter
+    });
 
-      // Hard rule: pure bowlers ALWAYS at 9-11, sorted by batting (best bat first)
-      if (role === 'bowler') return 900 - bat;
+    // Sort each bucket by batting ability (best first)
+    const byBatting = (a, b) => (b.stats.batting || 0) - (a.stats.batting || 0);
 
-      // Wicketkeepers — sorted by batting ability
-      if (role === 'wicketkeeper') {
-        if (bat >= 75) return 200 - bat; // good WK-batter opens or bats 3
-        return 450 - bat; // weaker WK at #4-5
+    pureBatters.sort(byBatting);
+    wicketkeepers.sort(byBatting);
+    allRounders.sort(byBatting);
+    pureBowlers.sort(byBatting);
+
+    // CRICKET ORDER: openers first, then middle, then bowlers last
+    // Positions 1-3: 2 best pureBatters (top-order) + best WK (if bat>=70)
+    // Positions 4-6: remaining batters + WKs + best AR
+    // Positions 7-8: remaining ARs
+    // Positions 9-11: pureBowlers (sorted by batting)
+
+    const result = [];
+
+    // Sort pureBatters by subRole priority
+    const topOrderBatters = pureBatters.filter(p => p.subRole === 'top-order').sort(byBatting);
+    const middleOrderBatters = pureBatters.filter(p => p.subRole === 'middle-order').sort(byBatting);
+    const finishers = pureBatters.filter(p => p.subRole === 'finisher').sort(byBatting);
+    const otherBatters = pureBatters.filter(p => !['top-order','middle-order','finisher'].includes(p.subRole));
+
+    // #1-3: top-order batters + good WK (bat>=70)
+    const goodWKs = wicketkeepers.filter(p => (p.stats.batting || 0) >= 70);
+    const otherWKs = wicketkeepers.filter(p => (p.stats.batting || 0) < 70);
+
+    // Add top-order batters first (at least 2 openers)
+    result.push(...topOrderBatters);
+    // Add good WKs at #3 typically
+    result.push(...goodWKs);
+    // Middle-order batters at #4-5
+    result.push(...middleOrderBatters);
+    // Weaker WKs at #4-5
+    result.push(...otherWKs);
+    // Batting all-rounders at #5-6
+    const battingARs = allRounders.filter(p => p.subRole === 'batting-ar').sort(byBatting);
+    result.push(...battingARs);
+    // Finishers at #5-7
+    result.push(...finishers);
+    // Other batters (unknown subRole)
+    result.push(...otherBatters);
+    // Bowling all-rounders at #7-8
+    const bowlingARs = allRounders.filter(p => p.subRole !== 'batting-ar').sort(byBatting);
+    result.push(...bowlingARs);
+    // Pure bowlers ALWAYS LAST (#9-11)
+    result.push(...pureBowlers);
+
+    // FINAL VERIFICATION: ensure no bowler is in first 7 positions
+    for (let i = 0; i < Math.min(7, result.length); i++) {
+      if (result[i].role === 'bowler') {
+        console.error('[BATTING ORDER BUG] Bowler at position', i+1, ':', result[i].name);
       }
-
-      // Pure batters
-      if (role === 'batter') {
-        if (sub === 'top-order') return 100 - bat; // openers and #3
-        if (sub === 'middle-order') return 400 - bat;
-        if (sub === 'finisher') return 600 - bat;
-        return 350 - bat; // unknown subRole batter
-      }
-
-      // All-rounders
-      if (role === 'allRounder') {
-        if (sub === 'batting-ar' && bat >= 65) return 500 - bat; // batting AR at #5-6
-        if (sub === 'batting-ar') return 650 - bat; // weaker bat AR at #6-7
-        if (sub === 'bowling-ar') return 750 - bat; // bowling AR at #7-8
-        return 700 - bat;
-      }
-
-      return 800; // unknown
     }
 
-    return players.sort((a, b) => getBattingPosition(a) - getBattingPosition(b));
+    return result;
   }
 
   // Super Over: 6 balls, pick best batter + best bowler
@@ -1073,7 +1121,10 @@ window.SimulationEngine = (function() {
     allPlayers.forEach(p => {
       const form = tournament.playerForms[p.id];
       if (!form || form.isInjured) return;
-      const injuryProb = (100 - p.stats.fitness) / 1200;
+      // Injury probability reduced (was too frequent)
+      // High fitness (90+) = 0.2% per match
+      // Low fitness (50) = 1.67% per match
+      const injuryProb = (100 - p.stats.fitness) / 3000;
       if (Math.random() < injuryProb) {
         form.isInjured = true;
         form.injuryMatchesLeft = 1 + Math.floor(Math.random() * 3);

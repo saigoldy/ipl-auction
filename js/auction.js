@@ -464,7 +464,7 @@ window.AuctionEngine = (function() {
   };
 
   // Realistic max bid based on player tier + bidding war intensity
-  // 5+ teams competing = chaos mode, can reach 25+ Cr for top stars
+  // Only legends (95+ star, young) can reach 25+ Cr
   function getRealisticMaxBid(player) {
     const star = player.starPower;
     const age = player.age;
@@ -472,27 +472,32 @@ window.AuctionEngine = (function() {
     // Count distinct bidders on current player (war intensity)
     const distinctBidders = state && state.bidWars ? Object.keys(state.bidWars).length : 0;
 
-    // Base multiplier by tier
+    // Base multiplier by tier (reduced from previous values)
     let multiplier;
-    if (star >= 90) multiplier = 6.0;            // Marquee elite
-    else if (star >= 80) multiplier = 5.0;       // Top stars
-    else if (star >= 60) multiplier = 3.5;       // Mid-tier
-    else if (star >= 40) multiplier = 2.5;       // Decent
-    else if (star >= 20) multiplier = 2.0;       // Budget
-    else if (age <= 23 && player.hiddenGem) multiplier = 7.0; // Young gems
-    else multiplier = 1.8;
+    if (star >= 95) multiplier = 6.0;            // Legends only (Kohli/Bumrah/Rohit peak)
+    else if (star >= 90) multiplier = 4.5;       // Marquee elite
+    else if (star >= 80) multiplier = 3.5;       // Top stars
+    else if (star >= 60) multiplier = 2.5;       // Mid-tier
+    else if (star >= 40) multiplier = 2.0;       // Decent
+    else if (star >= 20) multiplier = 1.6;       // Budget
+    else if (age <= 23 && player.hiddenGem) multiplier = 4.5; // Young gems
+    else multiplier = 1.5;
+
+    // Hard cap — absolute maximum bid regardless of tier × war
+    // Only 95+ legends can breach 25 Cr
+    const hardCeiling = star >= 95 ? 30000 : star >= 85 ? 20000 : star >= 70 ? 12000 : 8000;
 
     // BIDDING WAR INTENSITY MULTIPLIER (the chaos factor)
+    // War multiplier reduced — 5+ teams doesn't mean unlimited
     let warMultiplier = 1.0;
-    if (distinctBidders >= 5) warMultiplier = 2.5;       // 5+ teams = pure chaos
-    else if (distinctBidders >= 4) warMultiplier = 1.8;  // 4 teams = heated
-    else if (distinctBidders >= 3) warMultiplier = 1.4;  // 3 teams = competitive
-    else if (distinctBidders >= 2) warMultiplier = 1.15; // 2 teams = mild boost
+    if (distinctBidders >= 5) warMultiplier = 1.5;       // was 2.5
+    else if (distinctBidders >= 4) warMultiplier = 1.3;  // was 1.8
+    else if (distinctBidders >= 3) warMultiplier = 1.15; // was 1.4
+    else if (distinctBidders >= 2) warMultiplier = 1.05; // was 1.15
 
-    // For top stars, no upper cap — bidding war can take it to 25+ Cr
-    // For others, slight ceiling to prevent absurd prices
-    const maxAllowed = star >= 80 ? 9999 : (player.basePrice * multiplier * warMultiplier);
-    return Math.min(player.basePrice * multiplier * warMultiplier, maxAllowed === 9999 ? 99999 : maxAllowed);
+    const computedMax = player.basePrice * multiplier * warMultiplier;
+    // Apply hard ceiling to prevent runaway bids
+    return Math.min(computedMax, hardCeiling);
   }
 
   function evaluateBid(team, player, bidAmount) {
@@ -542,10 +547,36 @@ window.AuctionEngine = (function() {
     const needLevel = rc[role] < needs[roleKey].min ? 'high'
       : rc[role] < needs[roleKey].max ? 'medium' : 'low';
 
-    // 1. HARD BLOCK: completely full role (>max) AND low need → skip always
+    // LOGICAL SKIP REASONS (not random chance):
+
+    // 1. Role fully saturated + low need → skip
     if (!isDesperate && needLevel === 'low') {
-      // Full role: 85% chance to skip (still bid 15% for variety)
-      if (Math.random() < 0.85) return { willBid: false };
+      return { willBid: false };
+    }
+
+    // 2. Player is old (32+) AND below average (<50 star) AND not high-need
+    //    → these players regularly go unsold in real IPL
+    if (!isDesperate && player.age >= 32 && player.starPower < 50 && needLevel !== 'high') {
+      return { willBid: false };
+    }
+
+    // 3. Budget player (<30 star) who doesn't fit team's play style AND not high-need
+    if (!isDesperate && player.starPower < 30 && needLevel !== 'high') {
+      // Check play-style mismatch
+      const isPace = ['RF', 'RFM', 'LF', 'LFM'].includes(player.bowlingStyle);
+      const isSpin = ['OB', 'SLA', 'LB', 'CLA'].includes(player.bowlingStyle);
+      const mismatch = (isPace && team.playStyle.pacePreference < 0.4) ||
+                       (isSpin && team.playStyle.pacePreference > 0.7);
+      if (mismatch) return { willBid: false };
+    }
+
+    // 4. Already have better player at same sub-role
+    if (!isDesperate && subCount >= 1) {
+      const existingSameSubRole = ts.squad
+        .map(s => s.player)
+        .filter(p => p.subRole === player.subRole);
+      const betterExists = existingSameSubRole.some(p => p.starPower >= player.starPower + 15);
+      if (betterExists && needLevel !== 'high') return { willBid: false };
     }
 
     // 2. HARD BLOCK: player way too expensive for low-need role
@@ -828,18 +859,29 @@ window.AuctionEngine = (function() {
       if (maxBid > extraCap) maxBid = extraCap;
     }
 
-    // ===== BIDDING WAR INTENSITY (chaos mode when many teams compete) =====
+    // ===== BIDDING WAR INTENSITY (rare chaos, not every player) =====
     const distinctBiddersCount = state.bidWars ? Object.keys(state.bidWars).length : 0;
     let warBoost = 1.0;
-    if (distinctBiddersCount >= 5) {
-      warBoost = 2.0; // 5+ teams = chaos, anything goes
-    } else if (distinctBiddersCount >= 4) {
-      warBoost = 1.6;
-    } else if (distinctBiddersCount >= 3) {
-      warBoost = 1.3;
+    // Only apply war boost for decent+ players, not filler
+    if (player.starPower >= 60) {
+      if (distinctBiddersCount >= 5) warBoost = 1.4;     // was 2.0
+      else if (distinctBiddersCount >= 4) warBoost = 1.25; // was 1.6
+      else if (distinctBiddersCount >= 3) warBoost = 1.12; // was 1.3
     }
     if (warBoost > 1.0) {
       maxBid *= warBoost;
+    }
+
+    // ===== FORM FACTOR (small influence for AI) =====
+    // A player's current form ceiling/floor gap indicates consistency
+    // Narrow gap = more reliable = small premium
+    // Wide gap = volatile = small discount
+    // (formRange already declared in value score section — re-use)
+    const formRangeLocal = player.stats.formCeiling - player.stats.formFloor;
+    if (formRangeLocal < 30) {
+      maxBid *= 1.05; // very consistent — small boost
+    } else if (formRangeLocal > 50) {
+      maxBid *= 0.93; // volatile — small cut
     }
 
     // ===== TIERED SPENDING STRATEGY =====
@@ -848,28 +890,27 @@ window.AuctionEngine = (function() {
     const isAverage = player.starPower >= 30 && player.starPower < 50;
     const hasPotential = player.age <= 24 || player.hiddenGem;
 
-    // Star player: big spend allowed if needed
+    // Star player: moderate boost
     if (isStar && needScore >= 40) {
-      maxBid *= 1.4; // strong boost for stars in needed roles
+      maxBid *= 1.25;
     }
-    if (player.starPower >= 90 && needScore >= 50) {
-      maxBid *= 1.3; // marquee elite — extra layer
+    if (player.starPower >= 95 && needScore >= 50) {
+      maxBid *= 1.2; // legend tier
     }
 
-    // Young potential / hidden gem: bidding war boost (3-5x base possible)
+    // Young potential / hidden gem: modest boost
     if (hasPotential && needScore >= 30) {
-      maxBid *= 1.3;
+      maxBid *= 1.15;
     }
 
-    // Average player: keep value-conscious (no big boost)
-    // Only mild boost if genuine high-need
+    // Average player: value-conscious
     if (isAverage && needScore >= 60) {
-      maxBid *= 1.1;
+      maxBid *= 1.05;
     }
 
-    // BLUFF OVERPAY (10% chance on average players — causes chaos)
-    if (isAverage && Math.random() < 0.10) {
-      maxBid *= 1.5; // accidentally overpay
+    // BLUFF OVERPAY: reduced to 5% (was 10%)
+    if (isAverage && Math.random() < 0.05) {
+      maxBid *= 1.3;
     }
 
     // Late auction urgency: must grab remaining players
@@ -883,16 +924,13 @@ window.AuctionEngine = (function() {
     const budgetUsedPct = 1 - (ts.budget / 12500);
 
     if (auctionPct > 0.5 && budgetUsedPct < 0.4) {
-      // Halfway, spent <40% → boost ONLY for stars or high-need
-      if (isStar || needScore >= 60) maxBid *= 1.4;
+      if (isStar || needScore >= 60) maxBid *= 1.2; // was 1.4
     }
     if (auctionPct > 0.7 && budgetUsedPct < 0.5) {
-      // Late, spent <50% → broader boost
-      if (player.starPower >= 50 || needScore >= 40) maxBid *= 1.6;
+      if (player.starPower >= 50 || needScore >= 40) maxBid *= 1.3; // was 1.6
     }
     if (auctionPct > 0.85 && ts.budget > 3000) {
-      // Final stretch with >30 Cr unspent — burn on quality picks
-      if (player.starPower >= 40 || needScore >= 30) maxBid *= 2.0;
+      if (player.starPower >= 40 || needScore >= 30) maxBid *= 1.5; // was 2.0
     }
 
     // Reached 18 with budget left: extras can go higher if quality
