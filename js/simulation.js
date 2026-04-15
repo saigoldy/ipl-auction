@@ -189,15 +189,27 @@ window.SimulationEngine = (function() {
       keyMoments.push({ text: `🌧️ RAIN! Match affected by rain delay!`, highlight: true });
     }
 
-    // --- UPSET FACTOR ---
+    // --- MATCH RANDOMNESS — unpredictability so not always the same team wins ---
     const teamAStrength = batFirst11.reduce((s, p) => s + (p.stats.batting + p.stats.bowling) / 2, 0);
     const teamBStrength = bowlFirst11.reduce((s, p) => s + (p.stats.batting + p.stats.bowling) / 2, 0);
-    let underdogBoost = null;
     const strengthDiff = Math.abs(teamAStrength - teamBStrength);
-    if (strengthDiff > 40 && Math.random() < 0.2) {
-      underdogBoost = teamAStrength < teamBStrength ? teamAId : teamBId;
-      const underdogName = TEAMS.find(t => t.id === underdogBoost).shortName;
-      keyMoments.push({ text: `💪 ${underdogName} are fired up today!`, highlight: true });
+
+    let underdogBoost = null;
+    // Upset probability scales — weaker teams CAN beat stronger ones
+    // In real IPL, even bottom teams beat top teams ~30-35% of the time
+    if (strengthDiff > 80) {
+      // Very one-sided on paper: 25% upset chance
+      if (Math.random() < 0.25) underdogBoost = teamAStrength < teamBStrength ? teamAId : teamBId;
+    } else if (strengthDiff > 40) {
+      // Moderate gap: 35% upset chance
+      if (Math.random() < 0.35) underdogBoost = teamAStrength < teamBStrength ? teamAId : teamBId;
+    } else {
+      // Close match: 45% either team boost (really 50/50)
+      if (Math.random() < 0.45) underdogBoost = Math.random() > 0.5 ? teamAId : teamBId;
+    }
+    if (underdogBoost) {
+      const name = TEAMS.find(t => t.id === underdogBoost).shortName;
+      keyMoments.push({ text: `💪 ${name} come in with confidence today!`, highlight: true });
     }
 
     // Simulate innings
@@ -396,7 +408,9 @@ window.SimulationEngine = (function() {
     const form = tournament.playerForms[p.id];
     const formMod = form ? form.currentForm / 70 : 1;
     const primary = p.role === 'bowler' ? p.stats.bowling : p.role === 'allRounder' ? (p.stats.batting + p.stats.bowling) / 2 : p.stats.batting;
-    return primary * formMod;
+    // Add small random factor so ratings aren't deterministic
+    const randomMod = 0.95 + Math.random() * 0.1; // ±5%
+    return primary * formMod * randomMod;
   }
 
   // Select Playing XI + Impact Player substitute
