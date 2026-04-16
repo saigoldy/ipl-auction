@@ -2,15 +2,10 @@
 window.AuctionEngine = (function() {
   let state = null;
 
-  // Tiered bid increments (matches real IPL auction rules)
-  // Small bids crawl, big bids leap — lets wars escalate realistically.
+  // Bid increments: 10L below 1 Cr, flat 0.25 Cr (25 L) above
   function getIncrement(currentBid) {
-    if (currentBid < 100) return 10;      // < 1 Cr: 10 L
-    if (currentBid < 200) return 20;      // 1-2 Cr: 20 L
-    if (currentBid < 500) return 25;      // 2-5 Cr: 25 L
-    if (currentBid < 1000) return 50;     // 5-10 Cr: 50 L
-    if (currentBid < 2000) return 100;    // 10-20 Cr: 1 Cr
-    return 200;                           // 20+ Cr: 2 Cr
+    if (currentBid < 100) return 10;      // < 1 Cr: 10 L steps
+    return 25;                             // 1 Cr+: flat 0.25 Cr (25 L) steps
   }
 
   function formatPrice(lakhs) {

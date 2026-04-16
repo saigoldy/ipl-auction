@@ -121,10 +121,13 @@ describe('Auction Engine — canAfford', () => {
     expect(AuctionEngine.canAfford('MI', 100)).toBe(true);
   });
 
-  test('Increment is always 25L (0.25 Cr)', () => {
-    expect(AuctionEngine.getIncrement(0)).toBe(25);
-    expect(AuctionEngine.getIncrement(200)).toBe(25);
-    expect(AuctionEngine.getIncrement(2000)).toBe(25);
+  test('Bid increments: 10L below 1 Cr, 25L above', () => {
+    expect(AuctionEngine.getIncrement(0)).toBe(10);    // below 1 Cr
+    expect(AuctionEngine.getIncrement(50)).toBe(10);   // below 1 Cr
+    expect(AuctionEngine.getIncrement(100)).toBe(25);  // 1 Cr
+    expect(AuctionEngine.getIncrement(500)).toBe(25);  // 5 Cr
+    expect(AuctionEngine.getIncrement(1500)).toBe(25); // 15 Cr
+    expect(AuctionEngine.getIncrement(2500)).toBe(25); // 25 Cr
   });
 });
 
@@ -305,8 +308,9 @@ describe('Batting Order — realistic positions', () => {
     expect(getBattingPosition(kohli)).toBeLessThan(getBattingPosition(middleOrder));
   });
 
-  test('Finishers bat after middle-order', () => {
-    const finisher = PLAYERS.find(p => p.subRole === 'finisher');
+  test('Pure-batter finishers bat after middle-order', () => {
+    // WK-finishers (like Dhoni) are exception — they can open/bat #3
+    const finisher = PLAYERS.find(p => p.subRole === 'finisher' && p.role === 'batter');
     const middle = PLAYERS.find(p => p.subRole === 'middle-order' && p.role === 'batter');
     if (finisher && middle) expect(getBattingPosition(finisher)).toBeGreaterThan(getBattingPosition(middle));
   });
