@@ -2,9 +2,15 @@
 window.AuctionEngine = (function() {
   let state = null;
 
-  // Fixed bid increment: 0.25 Cr (25 Lakhs) at all levels
+  // Tiered bid increments (matches real IPL auction rules)
+  // Small bids crawl, big bids leap — lets wars escalate realistically.
   function getIncrement(currentBid) {
-    return 25;
+    if (currentBid < 100) return 10;      // < 1 Cr: 10 L
+    if (currentBid < 200) return 20;      // 1-2 Cr: 20 L
+    if (currentBid < 500) return 25;      // 2-5 Cr: 25 L
+    if (currentBid < 1000) return 50;     // 5-10 Cr: 50 L
+    if (currentBid < 2000) return 100;    // 10-20 Cr: 1 Cr
+    return 200;                           // 20+ Cr: 2 Cr
   }
 
   function formatPrice(lakhs) {
@@ -472,28 +478,29 @@ window.AuctionEngine = (function() {
     // Count distinct bidders on current player (war intensity)
     const distinctBidders = state && state.bidWars ? Object.keys(state.bidWars).length : 0;
 
-    // Base multiplier by tier (reduced from previous values)
+    // Base multiplier by tier — tuned so legends reach ~30 Cr, top stars hit 18-22 Cr.
     let multiplier;
-    if (star >= 95) multiplier = 6.0;            // Legends only (Kohli/Bumrah/Rohit peak)
-    else if (star >= 90) multiplier = 4.5;       // Marquee elite
-    else if (star >= 80) multiplier = 3.5;       // Top stars
-    else if (star >= 60) multiplier = 2.5;       // Mid-tier
-    else if (star >= 40) multiplier = 2.0;       // Decent
-    else if (star >= 20) multiplier = 1.6;       // Budget
-    else if (age <= 23 && player.hiddenGem) multiplier = 4.5; // Young gems
-    else multiplier = 1.5;
+    if (star >= 95) multiplier = 15.0;           // Legends (Kohli/Bumrah/Rohit) → up to ~30 Cr
+    else if (star >= 90) multiplier = 10.0;      // Marquee elite (Pant, Surya) → ~20 Cr
+    else if (star >= 85) multiplier = 8.0;       // Top stars (Gill, Jaiswal) → ~16 Cr
+    else if (star >= 80) multiplier = 6.5;       // Big names (Iyer, Samson) → ~13 Cr
+    else if (star >= 70) multiplier = 4.5;       // Solid picks → ~9 Cr
+    else if (star >= 60) multiplier = 3.5;       // Mid-tier
+    else if (star >= 40) multiplier = 2.7;       // Decent
+    else if (star >= 20) multiplier = 2.0;       // Budget
+    else if (age <= 23 && player.hiddenGem) multiplier = 6.0; // Young gems
+    else multiplier = 1.7;
 
-    // Hard cap — absolute maximum bid regardless of tier × war
-    // Only 95+ legends can breach 25 Cr
-    const hardCeiling = star >= 95 ? 30000 : star >= 85 ? 20000 : star >= 70 ? 12000 : 8000;
+    // Hard cap (lakhs) — per-tier absolute ceiling so bids don't run away
+    const hardCeiling = star >= 95 ? 3500 : star >= 90 ? 2600 : star >= 85 ? 2200
+                      : star >= 70 ? 1700 : star >= 50 ? 1100 : 800;
 
-    // BIDDING WAR INTENSITY MULTIPLIER (the chaos factor)
-    // War multiplier reduced — 5+ teams doesn't mean unlimited
+    // Bidding war intensity — more teams = bigger premium
     let warMultiplier = 1.0;
-    if (distinctBidders >= 5) warMultiplier = 1.5;       // was 2.5
-    else if (distinctBidders >= 4) warMultiplier = 1.3;  // was 1.8
-    else if (distinctBidders >= 3) warMultiplier = 1.15; // was 1.4
-    else if (distinctBidders >= 2) warMultiplier = 1.05; // was 1.15
+    if (distinctBidders >= 5) warMultiplier = 1.55;
+    else if (distinctBidders >= 4) warMultiplier = 1.35;
+    else if (distinctBidders >= 3) warMultiplier = 1.18;
+    else if (distinctBidders >= 2) warMultiplier = 1.08;
 
     const computedMax = player.basePrice * multiplier * warMultiplier;
     // Apply hard ceiling to prevent runaway bids
@@ -831,8 +838,9 @@ window.AuctionEngine = (function() {
       // 1.5x avg for medium-need
       // 0.7x avg for low-need (save for needed slots)
       let avgMultiplier;
-      if (needScore >= 70) avgMultiplier = 3.0;       // high need: splurge OK
-      else if (needScore >= 50) avgMultiplier = 2.0;  // medium need
+      if (needScore >= 85) avgMultiplier = 5.0;       // elite need — marquee legend splurge
+      else if (needScore >= 70) avgMultiplier = 3.5;  // high need
+      else if (needScore >= 50) avgMultiplier = 2.2;  // medium need
       else if (needScore >= 30) avgMultiplier = 1.2;  // low need
       else avgMultiplier = 0.6;                        // not really needed
 
@@ -1303,10 +1311,30 @@ window.AuctionEngine = (function() {
     return state ? state.teamStates : {};
   }
 
+  // Admin: overwrite a team's budget live. Returns new budget in lakhs or null on failure.
+  // Used by the Postman admin broadcast to tweak purse during online auction.
+  function setTeamBudget(teamId, newBudgetLakhs) {
+    if (!state || !state.teamStates[teamId]) return null;
+    const lakhs = Number(newBudgetLakhs);
+    if (!Number.isFinite(lakhs) || lakhs < 0) return null;
+    state.teamStates[teamId].budget = Math.floor(lakhs);
+    return state.teamStates[teamId].budget;
+  }
+
+  // Admin: add lakhs to a team's budget (negative values subtract).
+  function addToTeamBudget(teamId, deltaLakhs) {
+    if (!state || !state.teamStates[teamId]) return null;
+    const delta = Number(deltaLakhs);
+    if (!Number.isFinite(delta)) return null;
+    state.teamStates[teamId].budget = Math.max(0, Math.floor(state.teamStates[teamId].budget + delta));
+    return state.teamStates[teamId].budget;
+  }
+
   return {
     init, getState, nextPlayer, humanBid, humanPass,
     on, getTeamData, getAllTeamStates, formatPrice, getIncrement,
     canAfford, canBuyPlayer, pause, resume, simulateAll, setOnlineTimer,
+    setTeamBudget, addToTeamBudget,
     // Online sync functions for non-host clients
     syncSold, syncState
   };

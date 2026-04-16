@@ -370,6 +370,16 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onHostChanged) Lobby.callbacks.onHostChanged(payload);
     });
 
+    // Admin: out-of-band budget patch (used by Postman/admin tooling)
+    realtimeChannel.on('broadcast', { event: 'admin_budget_patch' }, ({ payload }) => {
+      if (Lobby.callbacks.onAdminBudgetPatch) Lobby.callbacks.onAdminBudgetPatch(payload);
+    });
+
+    // Admin: host echoes applied budget back to all clients
+    realtimeChannel.on('broadcast', { event: 'admin_budget_applied' }, ({ payload }) => {
+      if (Lobby.callbacks.onAdminBudgetApplied) Lobby.callbacks.onAdminBudgetApplied(payload);
+    });
+
     realtimeChannel.on('broadcast', { event: 'sim_playoff_result' }, ({ payload }) => {
       if (Lobby.callbacks.onSimPlayoffResult) Lobby.callbacks.onSimPlayoffResult(payload);
     });

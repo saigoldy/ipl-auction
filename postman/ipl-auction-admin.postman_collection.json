@@ -26,6 +26,18 @@
       "value": "15000",
       "type": "string",
       "description": "New budget in lakhs (e.g. 12500 = ₹125 Cr, 15000 = ₹150 Cr)"
+    },
+    {
+      "key": "team_id",
+      "value": "MI",
+      "type": "string",
+      "description": "Target team for single-team budget patch: MI, CSK, RCB, DC, KKR, SRH, PBKS, RR, GT, LSG"
+    },
+    {
+      "key": "delta_lakhs",
+      "value": "5000",
+      "type": "string",
+      "description": "Amount to ADD to a team's budget (in lakhs). Use negative to subtract. 5000 = +50 Cr"
     }
   ],
   "item": [
@@ -168,6 +180,110 @@
           ]
         },
         "description": "Reset a stuck auction back to waiting status. Requires host privileges."
+      }
+    },
+    {
+      "name": "7. LIVE: Set one team's budget (online, in-progress auction)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Look up room UUID from room_code so we can address the realtime channel.",
+              "const url = pm.variables.get('supabase_url') + '/rest/v1/rooms?code=eq.' + pm.variables.get('room_code') + '&select=id';",
+              "pm.sendRequest({",
+              "  url: url,",
+              "  method: 'GET',",
+              "  header: {",
+              "    apikey: pm.variables.get('anon_key'),",
+              "    Authorization: 'Bearer ' + pm.variables.get('anon_key')",
+              "  }",
+              "}, (err, res) => {",
+              "  if (err) { console.error('Room lookup failed:', err); return; }",
+              "  const rows = res.json();",
+              "  if (!rows || !rows.length) { console.error('Room not found: ' + pm.variables.get('room_code')); return; }",
+              "  pm.variables.set('_room_id', rows[0].id);",
+              "  console.log('Resolved room_id:', rows[0].id);",
+              "});"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Broadcast accepted', () => {",
+              "  pm.expect([200, 202]).to.include(pm.response.code);",
+              "});",
+              "console.log('Admin patch sent:', pm.variables.get('team_id'), '→ ₹' + (pm.variables.get('new_budget_lakhs')/100) + ' Cr');"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"topic\": \"room:{{_room_id}}\",\n      \"event\": \"admin_budget_patch\",\n      \"payload\": {\n        \"teamId\": \"{{team_id}}\",\n        \"budgetLakhs\": {{new_budget_lakhs}}\n      },\n      \"private\": false\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{supabase_url}}/realtime/v1/api/broadcast",
+          "host": ["{{supabase_url}}"],
+          "path": ["realtime", "v1", "api", "broadcast"]
+        },
+        "description": "Change ONE team's budget during a live online auction.\n\nHow it works:\n1. Pre-request script looks up the room UUID from room_code\n2. Sends a realtime broadcast event `admin_budget_patch` to channel `room:<uuid>`\n3. The host's browser applies the change to AuctionEngine state and echoes `admin_budget_applied` to all clients\n\nPrereq: the host must be online in the room (this only works if they're running the app).\n\nVariables:\n- `room_code` — 6-char code, e.g. 4JUGVT\n- `team_id` — MI, CSK, RCB, DC, KKR, SRH, PBKS, RR, GT, LSG\n- `new_budget_lakhs` — new absolute budget in lakhs (15000 = ₹150 Cr)\n\nTo ADD instead of SET, use request #8 instead."
+      }
+    },
+    {
+      "name": "8. LIVE: Add/subtract a team's budget (online, in-progress auction)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "const url = pm.variables.get('supabase_url') + '/rest/v1/rooms?code=eq.' + pm.variables.get('room_code') + '&select=id';",
+              "pm.sendRequest({",
+              "  url: url,",
+              "  method: 'GET',",
+              "  header: {",
+              "    apikey: pm.variables.get('anon_key'),",
+              "    Authorization: 'Bearer ' + pm.variables.get('anon_key')",
+              "  }",
+              "}, (err, res) => {",
+              "  if (err) { console.error('Room lookup failed:', err); return; }",
+              "  const rows = res.json();",
+              "  if (!rows || !rows.length) { console.error('Room not found'); return; }",
+              "  pm.variables.set('_room_id', rows[0].id);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "apikey", "value": "{{anon_key}}" },
+          { "key": "Authorization", "value": "Bearer {{anon_key}}" },
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"messages\": [\n    {\n      \"topic\": \"room:{{_room_id}}\",\n      \"event\": \"admin_budget_patch\",\n      \"payload\": {\n        \"mode\": \"add\",\n        \"teamId\": \"{{team_id}}\",\n        \"deltaLakhs\": {{delta_lakhs}}\n      },\n      \"private\": false\n    }\n  ]\n}"
+        },
+        "url": {
+          "raw": "{{supabase_url}}/realtime/v1/api/broadcast",
+          "host": ["{{supabase_url}}"],
+          "path": ["realtime", "v1", "api", "broadcast"]
+        },
+        "description": "Add (or subtract, with negative value) to ONE team's budget live. Uses the same realtime broadcast path as #7.\n\nVariables:\n- `delta_lakhs` — amount to add in lakhs. 5000 = +₹50 Cr. Use negative (e.g. -2000) to subtract.\n\nThe host clamps to zero if the delta would go below that."
       }
     },
     {
