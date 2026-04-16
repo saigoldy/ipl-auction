@@ -178,7 +178,21 @@
       <button class="btn btn-simulate" id="btn-simulate" onclick="App.simulateAuction()">⚡ SIMULATE ALL</button>
       <button class="btn btn-audio-chat" id="btn-audio-chat" onclick="handleAudioToggle()" style="display:none;background:#7C4DFF;color:#fff;padding:8px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer">🎙️ Join Voice</button>
       <button class="btn" id="btn-leave-auction" onclick="handleLeaveAuction()" style="display:none;background:#444;color:#fff;padding:8px 16px;font-size:13px;border:none;border-radius:6px;cursor:pointer">🚪 Leave Room</button>
+      <button class="btn" id="btn-admin-panel" onclick="openAdminPanel()" style="display:none;background:linear-gradient(135deg,#FFD700,#FF6B35);color:#000;padding:8px 16px;font-size:13px;font-weight:700;border:none;border-radius:6px;cursor:pointer">⚙️ ADMIN</button>
       <span id="audio-status" style="font-size:11px;color:var(--text-dim);margin-left:8px"></span>
+    </div>
+
+    <!-- Admin budget panel modal — only shown for ADMIN_EMAIL -->
+    <div id="admin-panel-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:10000;align-items:center;justify-content:center">
+      <div style="background:#1a1a2e;color:#fff;padding:24px;border-radius:12px;max-width:520px;width:90%;max-height:80vh;overflow-y:auto;border:2px solid #FFD700;box-shadow:0 4px 24px rgba(0,0,0,.6);font:14px system-ui,sans-serif">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h3 style="margin:0;color:#FFD700">⚙️ Admin Budget Override</h3>
+          <button onclick="closeAdminPanel()" style="background:#333;color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer">✕</button>
+        </div>
+        <p style="color:#aaa;font-size:12px;margin-bottom:14px">Set any team's budget to any amount (in lakhs). Changes apply immediately for the host and sync to all clients. 100 L = 1 Cr.</p>
+        <div id="admin-team-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
+        <div id="admin-panel-status" style="margin-top:14px;font-size:12px;color:#4CAF50"></div>
+      </div>
     </div>
     <div class="auction-main">
       <!-- Left: Current Player -->
@@ -1096,6 +1110,109 @@
       handleJoinRoom();
     }
 
+    // ===== ADMIN PANEL (budget override — visible only for ADMIN_EMAIL) =====
+    // Client-side email gate only; anyone reading the JS could bypass it, but
+    // the host listener already accepts admin_budget_patch from any broadcast
+    // source, so this is a UX gate not a security boundary. Keep rooms to
+    // known players.
+    const ADMIN_EMAIL = 'saigoldy1601@gmail.com';
+
+    function isAdminUser() {
+      try { return (Auth.getUser()?.email || '').toLowerCase() === ADMIN_EMAIL; }
+      catch (e) { return false; }
+    }
+
+    function updateAdminButtonVisibility() {
+      const btn = document.getElementById('btn-admin-panel');
+      if (!btn) return;
+      btn.style.display = isAdminUser() ? '' : 'none';
+    }
+
+    function openAdminPanel() {
+      if (!isAdminUser()) return;
+      const modal = document.getElementById('admin-panel-modal');
+      const grid = document.getElementById('admin-team-grid');
+      if (!modal || !grid) return;
+      const states = AuctionEngine.getAllTeamStates();
+      grid.innerHTML = '';
+      TEAMS.forEach(t => {
+        const ts = states[t.id];
+        if (!ts) return;
+        const currentCr = (ts.budget / 100).toFixed(2);
+        const row = document.createElement('div');
+        row.style.cssText = 'background:#0b0b1a;padding:10px;border-radius:6px;border:1px solid #333';
+        row.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <strong style="color:#FFD700">${t.shortName}</strong>
+            <span style="font-size:11px;color:#aaa">${ts.filled}/25</span>
+          </div>
+          <div style="font-size:11px;color:#aaa;margin-bottom:4px">₹${currentCr} Cr</div>
+          <div style="display:flex;gap:4px">
+            <input type="number" id="admin-budget-input-${t.id}" placeholder="Cr" min="0" step="0.5"
+                   style="width:60%;padding:4px;background:#222;color:#fff;border:1px solid #555;border-radius:4px;font-size:12px">
+            <button onclick="applyAdminBudget('${t.id}')"
+                    style="flex:1;padding:4px;background:#4CAF50;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700">SET</button>
+          </div>
+        `;
+        grid.appendChild(row);
+      });
+      modal.style.display = 'flex';
+    }
+
+    function closeAdminPanel() {
+      const modal = document.getElementById('admin-panel-modal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function applyAdminBudget(teamId) {
+      const input = document.getElementById('admin-budget-input-' + teamId);
+      if (!input) return;
+      const cr = parseFloat(input.value);
+      if (!Number.isFinite(cr) || cr < 0) {
+        setAdminStatus('Invalid amount for ' + teamId, '#f44336');
+        return;
+      }
+      const lakhs = Math.floor(cr * 100);
+
+      if (window.onlineMode && window.Lobby) {
+        if (Lobby.isHost()) {
+          const newBudget = AuctionEngine.setTeamBudget(teamId, lakhs);
+          if (newBudget === null) {
+            setAdminStatus('Failed: team not found', '#f44336');
+            return;
+          }
+          Lobby.broadcastGameState('admin_budget_applied', { teamId, budgetLakhs: newBudget });
+          setAdminStatus(`${teamId} → ₹${(newBudget/100).toFixed(2)} Cr (applied as host)`, '#4CAF50');
+        } else {
+          // Non-host: send broadcast to host
+          if (Lobby.broadcastGameState) {
+            Lobby.broadcastGameState('admin_budget_patch', { teamId, budgetLakhs: lakhs });
+            setAdminStatus(`${teamId} → ₹${cr} Cr (sent to host)`, '#4CAF50');
+          } else {
+            setAdminStatus('Cannot send: no realtime channel', '#f44336');
+          }
+        }
+      } else {
+        // Offline: apply directly
+        const newBudget = AuctionEngine.setTeamBudget(teamId, lakhs);
+        if (newBudget === null) {
+          setAdminStatus('Failed: team not found', '#f44336');
+          return;
+        }
+        setAdminStatus(`${teamId} → ₹${(newBudget/100).toFixed(2)} Cr (offline mode)`, '#4CAF50');
+      }
+      // Refresh the budget row to show new value
+      setTimeout(() => openAdminPanel(), 400);
+    }
+
+    function setAdminStatus(msg, color) {
+      const el = document.getElementById('admin-panel-status');
+      if (!el) return;
+      el.textContent = msg;
+      el.style.color = color || '#4CAF50';
+      setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000);
+    }
+
     // ===== INIT =====
     function setBootMsg(msg) {
       const el = document.getElementById('boot-overlay-msg');
@@ -1118,6 +1235,7 @@
           if (user) {
             Auth.showApp();
             document.getElementById('btn-play-online').style.display = '';
+            updateAdminButtonVisibility();
             // Look for active room and auto-resume if the auction is actually in progress.
             // For waiting/picking_teams we only show the banner so the user can confirm.
             setBootMsg('Looking for your room…');

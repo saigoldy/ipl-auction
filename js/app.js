@@ -151,6 +151,9 @@ window.App = (function() {
     document.querySelectorAll('.screen:not(.active)').forEach(s => s.style.display = 'none');
     currentScreen = id;
 
+    // Admin button visibility refreshes on every screen change
+    if (typeof updateAdminButtonVisibility === 'function') updateAdminButtonVisibility();
+
     if (id === 'team-select') renderTeamSelect();
     if (id === 'lobby' && typeof loadActiveRooms === 'function') loadActiveRooms();
     if (id === 'home') {
