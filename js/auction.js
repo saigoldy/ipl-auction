@@ -502,6 +502,30 @@ window.AuctionEngine = (function() {
     return Math.min(computedMax, hardCeiling);
   }
 
+  // Exhaust-the-purse mode: late auction, team has unspent budget, needs more players
+  // Bids aggressively beyond realistic caps to spend the remaining purse
+  function exhaustModeEvaluate(team, player, bidAmount, ts) {
+    // Still block impossible bids (overseas limit, affordability)
+    if (ts.filled >= 25) return { willBid: false };
+    if (player.isOverseas && ts.overseasCount >= 8) return { willBid: false };
+    if (!canAfford(team.id, bidAmount)) return { willBid: false };
+
+    // Calculate how much to spend per remaining slot
+    const slotsWanted = Math.max(1, 22 - ts.filled); // aim for 22
+    const avgPerSlot = ts.budget / slotsWanted;
+
+    // Max bid: up to 2.5x average per slot OR 80% of budget (whichever is less)
+    let maxBid = Math.min(avgPerSlot * 2.5, ts.budget * 0.8);
+
+    // Never exceed 2x the hard realistic cap (so very bad players don't get ₹10 Cr)
+    const absoluteCap = getRealisticMaxBid(player) * 2;
+    maxBid = Math.min(maxBid, absoluteCap);
+
+    maxBid = Math.floor(maxBid);
+    const willBid = bidAmount <= maxBid;
+    return { willBid, maxBid, isBluff: false };
+  }
+
   function evaluateBid(team, player, bidAmount) {
     const ts = state.teamStates[team.id];
 
@@ -539,6 +563,18 @@ window.AuctionEngine = (function() {
     const slotsRemaining = state.playerPool.length - state.currentIndex;
     const slotsNeeded = Math.max(0, 18 - ts.filled);
     const isDesperate = slotsNeeded > 0 && slotsRemaining < slotsNeeded * 3;
+
+    // ===== EXHAUST-THE-PURSE MODE =====
+    // Near end of auction: if team has meaningful budget left AND < 25 players,
+    // bypass all filters and bid aggressively to use up the purse
+    const auctionProgress = state.currentIndex / state.playerPool.length;
+    const budgetUnspent = ts.budget / 12500; // 1.0 = full purse, 0.0 = nothing left
+    const needsMorePlayers = ts.filled < 22; // leave some room for 22-25 if possible
+    const exhaustMode = auctionProgress >= 0.85 && budgetUnspent > 0.08 && needsMorePlayers;
+    if (exhaustMode) {
+      // Skip all self-awareness filters, bid freely up to the inflated cap
+      return exhaustModeEvaluate(team, player, bidAmount, ts);
+    }
 
     // ===== SELF-AWARENESS FILTERS (probabilistic — keep some chaos) =====
     // Most filters reduce probability of bidding, not hard block.
@@ -783,7 +819,7 @@ window.AuctionEngine = (function() {
     }
 
     // 3. Auction fatigue: later in auction, AI occasionally makes poor decisions
-    const auctionProgress = state.currentIndex / state.playerPool.length;
+    // (auctionProgress already declared earlier)
     if (auctionProgress > 0.6 && Math.random() < 0.08) {
       // Random overbid or underbid from fatigue
       maxBid *= (0.7 + Math.random() * 0.6); // 0.7x to 1.3x
