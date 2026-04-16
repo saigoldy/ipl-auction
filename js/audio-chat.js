@@ -108,8 +108,7 @@ window.AudioChat = (function() {
     }
     Object.values(peers).forEach(pc => pc.close());
     peers = {};
-    Object.values(remoteAudios).forEach(a => a.remove());
-    remoteAudios = {};
+    Object.keys(remoteAudios).forEach(id => cleanupRemote(id));
     if (signalChannel) {
       const sb = window.supabaseClient;
       sb.removeChannel(signalChannel);
@@ -160,11 +159,57 @@ window.AudioChat = (function() {
       peers[from].close();
       delete peers[from];
     }
-    if (remoteAudios[from]) {
-      remoteAudios[from].remove();
-      delete remoteAudios[from];
-    }
+    cleanupRemote(from);
     updateUI();
+  }
+
+  function cleanupRemote(userId) {
+    const r = remoteAudios[userId];
+    if (!r) return;
+    try { if (r.source) r.source.disconnect(); } catch (e) {}
+    try { if (r.gain) r.gain.disconnect(); } catch (e) {}
+    try { if (r.audio) r.audio.remove(); } catch (e) {}
+    try { if (r.card) r.card.remove(); } catch (e) {}
+    try { if (r.remove) r.remove(); } catch (e) {}
+    delete remoteAudios[userId];
+  }
+
+  // Shared AudioContext for gain boost + level metering. Many browsers start
+  // the context in 'suspended' state until a user gesture — we resume it on
+  // any click. We also show a persistent unlock banner if output is blocked.
+  let sharedCtx = null;
+  const DEFAULT_GAIN = 1.8; // 180% default — WebRTC output is often quiet
+  function ensureAudioCtx() {
+    if (!sharedCtx) {
+      try {
+        sharedCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } catch (e) {
+        console.warn('[audio] AudioContext unsupported:', e);
+        return null;
+      }
+    }
+    if (sharedCtx.state === 'suspended') {
+      sharedCtx.resume().catch(e => console.warn('[audio] ctx resume:', e));
+    }
+    return sharedCtx;
+  }
+  // Resume context on any user gesture (click/touch/keypress)
+  ['click', 'touchstart', 'keydown'].forEach(evt => {
+    document.addEventListener(evt, () => {
+      if (sharedCtx && sharedCtx.state === 'suspended') sharedCtx.resume();
+      const banner = document.getElementById('audio-unlock-banner');
+      if (banner) banner.style.display = 'none';
+    }, { passive: true });
+  });
+
+  function showUnlockBanner() {
+    if (document.getElementById('audio-unlock-banner')) return;
+    const b = document.createElement('div');
+    b.id = 'audio-unlock-banner';
+    b.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);background:#ff9800;color:#000;padding:10px 18px;border-radius:8px;font:600 13px system-ui;z-index:10001;box-shadow:0 2px 12px rgba(0,0,0,.4);cursor:pointer';
+    b.textContent = '🔊 Click anywhere to enable voice chat audio';
+    b.addEventListener('click', () => b.remove());
+    document.body.appendChild(b);
   }
 
   async function createPeerAndOffer(targetId) {
@@ -280,90 +325,104 @@ window.AudioChat = (function() {
   }
 
   function attachRemoteAudio(userId, stream) {
-    if (remoteAudios[userId]) remoteAudios[userId].remove();
+    cleanupRemote(userId);
 
-    // Verify stream has audio tracks
     const tracks = stream.getAudioTracks();
-    console.log('[audio] Remote stream from', userId, '— audio tracks:', tracks.length, tracks.map(t => ({ enabled: t.enabled, muted: t.muted, label: t.label })));
+    console.log('[audio] Remote stream from', userId, '— audio tracks:', tracks.length);
     if (tracks.length === 0) {
       console.error('[audio] Remote stream has NO audio tracks!');
       return;
     }
 
+    const ctx = ensureAudioCtx();
+    const slot = Object.keys(remoteAudios).length;
+
+    // Hidden HTML audio element — required by Chromium so the remote track
+    // keeps flowing. Muted because WebAudio will do the actual playback.
     const audio = document.createElement('audio');
     audio.srcObject = stream;
     audio.autoplay = true;
-    // CONTROLS VISIBLE for debugging — small floating player
-    audio.controls = true;
-    audio.style.cssText = 'position:fixed;bottom:8px;right:' + (8 + Object.keys(remoteAudios).length * 220) + 'px;width:200px;z-index:9999;background:#1a1a2e;border:2px solid #7C4DFF;border-radius:6px';
+    audio.muted = true;
     audio.playsInline = true;
-    audio.volume = 1.0; // max volume
-    audio.muted = false; // explicitly not muted
+    audio.style.display = 'none';
     audio.id = 'audio-' + userId;
     document.body.appendChild(audio);
-    remoteAudios[userId] = audio;
+    audio.play().catch(() => {});
 
-    // Explicitly call play() to bypass autoplay restrictions
-    const playPromise = audio.play();
-    if (playPromise !== undefined) {
-      playPromise.then(() => {
-        console.log('[audio] ▶ Playing remote audio from', userId, 'volume:', audio.volume, 'muted:', audio.muted);
-      }).catch(e => {
-        console.error('[audio] ❌ Autoplay blocked:', e);
-        alert('Audio playback was blocked by your browser. Click anywhere on the page to enable audio.');
-        document.addEventListener('click', () => audio.play(), { once: true });
-      });
+    let source = null, gain = null, analyser = null;
+    if (ctx) {
+      try {
+        source = ctx.createMediaStreamSource(stream);
+        gain = ctx.createGain();
+        gain.gain.value = DEFAULT_GAIN;
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(gain);
+        gain.connect(ctx.destination);
+        source.connect(analyser);
+      } catch (e) {
+        console.error('[audio] WebAudio setup failed, falling back to HTML audio:', e);
+        audio.muted = false;
+        audio.volume = 1.0;
+        source = null;
+      }
+    } else {
+      audio.muted = false;
+      audio.volume = 1.0;
     }
 
-    // Audio level meter (visual signal that data is flowing)
-    setupLevelMeter(stream, userId);
+    if (ctx && ctx.state === 'suspended') showUnlockBanner();
+
+    // Visible UI card — volume slider + speaking indicator
+    const card = document.createElement('div');
+    card.id = 'audio-card-' + userId;
+    card.style.cssText = 'position:fixed;bottom:8px;right:' + (8 + slot * 190) + 'px;width:175px;padding:8px 10px;z-index:9999;background:#1a1a2e;color:#fff;border:2px solid #7C4DFF;border-radius:8px;font:12px system-ui,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.3)';
+    const shortId = String(userId).slice(0, 6);
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span>🎙️ ${shortId}</span>
+        <span class="dot" style="width:10px;height:10px;border-radius:50%;background:#444;transition:all 0.15s"></span>
+      </div>
+      <input type="range" min="0" max="3" step="0.05" value="${DEFAULT_GAIN}" class="vol" style="width:100%">
+      <div class="vol-label" style="font-size:10px;color:#aaa;margin-top:4px">Volume: ${Math.round(DEFAULT_GAIN * 100)}%</div>
+    `;
+    document.body.appendChild(card);
+    const dot = card.querySelector('.dot');
+    const volInput = card.querySelector('.vol');
+    const volLabel = card.querySelector('.vol-label');
+    volInput.addEventListener('input', (e) => {
+      const v = parseFloat(e.target.value);
+      if (gain) gain.gain.value = v;
+      else audio.volume = Math.min(1, v);
+      volLabel.textContent = 'Volume: ' + Math.round(v * 100) + '%';
+    });
+
+    remoteAudios[userId] = { audio, card, gain, source, analyser, dot, stream };
+
+    // Level meter using same shared context
+    if (analyser) runLevelMeter(userId);
 
     updateUI();
   }
 
-  // Visual indicator: shows green dot when peer is speaking
-  function setupLevelMeter(stream, userId) {
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const source = ctx.createMediaStreamSource(stream);
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      const data = new Uint8Array(analyser.frequencyBinCount);
-
-      // Create indicator
-      let dot = document.getElementById('audio-dot-' + userId);
-      if (!dot) {
-        dot = document.createElement('div');
-        dot.id = 'audio-dot-' + userId;
-        dot.style.cssText = 'position:fixed;bottom:60px;right:8px;width:14px;height:14px;border-radius:50%;background:#444;z-index:9999;border:2px solid #fff';
-        dot.title = 'Audio level from ' + userId;
-        document.body.appendChild(dot);
+  function runLevelMeter(userId) {
+    const r = remoteAudios[userId];
+    if (!r || !r.analyser) return;
+    const data = new Uint8Array(r.analyser.frequencyBinCount);
+    function tick() {
+      if (!remoteAudios[userId]) return;
+      r.analyser.getByteFrequencyData(data);
+      const avg = data.reduce((a, b) => a + b, 0) / data.length;
+      if (avg > 10) {
+        r.dot.style.background = '#4CAF50';
+        r.dot.style.boxShadow = '0 0 ' + Math.min(12, avg / 4) + 'px #4CAF50';
+      } else {
+        r.dot.style.background = '#444';
+        r.dot.style.boxShadow = 'none';
       }
-
-      let lastLog = 0;
-      function check() {
-        if (!remoteAudios[userId]) return;
-        analyser.getByteFrequencyData(data);
-        const avg = data.reduce((a, b) => a + b, 0) / data.length;
-        // Update dot color based on level
-        if (avg > 10) {
-          dot.style.background = '#4CAF50'; // green = audio detected
-          dot.style.transform = `scale(${1 + avg/100})`;
-          if (Date.now() - lastLog > 2000) {
-            console.log('[audio] 🔊 Audio level from', userId, ':', avg.toFixed(1));
-            lastLog = Date.now();
-          }
-        } else {
-          dot.style.background = '#444';
-          dot.style.transform = 'scale(1)';
-        }
-        requestAnimationFrame(check);
-      }
-      check();
-    } catch (e) {
-      console.warn('[audio] Level meter failed:', e);
+      requestAnimationFrame(tick);
     }
+    tick();
   }
 
   function updateUI() {

@@ -16,6 +16,15 @@
     <button onclick="location.reload()" style="margin-left:12px;padding:4px 16px;background:white;color:#ff5722;border:none;border-radius:4px;cursor:pointer;font-weight:bold">Reload Page</button>
   </div>
 
+  <!-- Boot loading overlay — hides the auth-screen flash on refresh -->
+  <div id="boot-overlay" style="position:fixed;inset:0;background:#0b0b1a;color:#fff;z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;font-family:system-ui,sans-serif">
+    <div style="font-size:48px">🏏</div>
+    <div style="font-size:18px;font-weight:600">IPL MEGA AUCTION</div>
+    <div style="width:44px;height:44px;border:4px solid #7C4DFF;border-top-color:transparent;border-radius:50%;animation:boot-spin 0.8s linear infinite"></div>
+    <div id="boot-overlay-msg" style="font-size:13px;color:#aaa">Loading…</div>
+    <style>@keyframes boot-spin { to { transform: rotate(360deg) } }</style>
+  </div>
+
   <!-- User bar (shown when logged in) -->
   <div id="user-bar" class="user-bar" style="display:none"></div>
 
@@ -823,6 +832,34 @@
       Lobby.callbacks.onLog = (payload) => App.handleOnlineEvent('log', payload);
       Lobby.callbacks.onHumanTurn = (payload) => App.handleOnlineEvent('human_turn', payload);
 
+      // Admin: remote budget patch (from Postman / admin tooling).
+      // Host applies authoritatively; clients just wait for the echo below.
+      Lobby.callbacks.onAdminBudgetPatch = (payload) => {
+        if (!payload || !payload.teamId) return;
+        if (!Lobby.isHost()) return;
+        let newBudget;
+        if (payload.mode === 'add' && typeof payload.deltaLakhs === 'number') {
+          newBudget = AuctionEngine.addToTeamBudget(payload.teamId, payload.deltaLakhs);
+        } else if (typeof payload.budgetLakhs === 'number') {
+          newBudget = AuctionEngine.setTeamBudget(payload.teamId, payload.budgetLakhs);
+        } else {
+          return;
+        }
+        if (newBudget === null) return;
+        Lobby.broadcastGameState('admin_budget_applied', {
+          teamId: payload.teamId,
+          budgetLakhs: newBudget
+        });
+        App.handleOnlineEvent('log', { msg: `🛠️ Admin: ${payload.teamId} budget → ₹${(newBudget/100).toFixed(2)} Cr`, type: 'dramatic' });
+      };
+
+      // Authoritative budget echo from host to all clients
+      Lobby.callbacks.onAdminBudgetApplied = (payload) => {
+        if (!payload || !payload.teamId) return;
+        AuctionEngine.setTeamBudget(payload.teamId, payload.budgetLakhs);
+        App.handleOnlineEvent('log', { msg: `💰 ${payload.teamId} budget updated to ₹${(payload.budgetLakhs/100).toFixed(2)} Cr`, type: '' });
+      };
+
       // Host transfer notification
       Lobby.callbacks.onHostChanged = (payload) => {
         if (!payload || !payload.newHostId) return;
@@ -1060,26 +1097,48 @@
     }
 
     // ===== INIT =====
+    function setBootMsg(msg) {
+      const el = document.getElementById('boot-overlay-msg');
+      if (el) el.textContent = msg;
+    }
+    function hideBootOverlay() {
+      const el = document.getElementById('boot-overlay');
+      if (el) el.style.display = 'none';
+    }
+
     document.addEventListener('DOMContentLoaded', async () => {
       try {
+        setBootMsg('Connecting…');
         const sb = initSupabase();
         if (sb && SUPABASE_URL !== 'YOUR_SUPABASE_URL') {
+          setBootMsg('Loading data…');
           await DataLoader.init();
+          setBootMsg('Signing in…');
           const user = await Auth.init();
           if (user) {
             Auth.showApp();
             document.getElementById('btn-play-online').style.display = '';
-
-            // Detect active room and show banner (NO auto-rejoin)
+            // Look for active room and auto-resume if the auction is actually in progress.
+            // For waiting/picking_teams we only show the banner so the user can confirm.
+            setBootMsg('Looking for your room…');
             try {
               await detectActiveRoomForBanner();
+              if (_detectedActiveRoom && _detectedActiveRoom.status === 'auction') {
+                setBootMsg('Rejoining auction…');
+                hideBootOverlay();
+                await confirmRejoin();
+                return;
+              }
             } catch (e) { console.error('Active room detect:', e); }
           }
+          hideBootOverlay();
         } else {
+          hideBootOverlay();
           playOffline();
         }
       } catch (initErr) {
         console.error('Init failed:', initErr);
+        hideBootOverlay();
         playOffline();
       }
     });
