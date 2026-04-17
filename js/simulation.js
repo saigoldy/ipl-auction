@@ -56,7 +56,8 @@ window.SimulationEngine = (function() {
       playerForms: playerForms,
       completedMatches: [],
       playoffs: null,
-      champion: null
+      champion: null,
+      lockedXIs: {} // teamId -> { starters: [...playerIds], impactPlayer } — fixed for entire tournament
     };
 
     // Init standings
@@ -324,18 +325,21 @@ window.SimulationEngine = (function() {
   }
 
   // Use user-saved XI, with like-for-like replacement for injured players
-  function selectUserXI(teamId, squad, userXI) {
+  // Apply locked XI with injury substitutions: injured starters get replaced,
+  // recovered starters RETURN to their original slot
+  function applyLockedXI(teamId, squad, lockedXI) {
     const selected = [];
     const missingStarters = [];
 
-    // Go through user's starters; if any are injured, find like-for-like replacement
-    userXI.starters.forEach(pid => {
+    // Walk through the LOCKED starters — these are the permanent XI
+    lockedXI.starters.forEach(pid => {
       const player = squad.find(p => p.id === pid);
-      if (!player) return; // player not in squad (shouldn't happen)
+      if (!player) return;
       const form = tournament.playerForms[player.id];
       const isInjured = form && form.isInjured;
 
       if (!isInjured) {
+        // Player is fit — stays in their slot (even if they were replaced last match)
         selected.push(player);
       } else {
         missingStarters.push(player);
@@ -346,20 +350,18 @@ window.SimulationEngine = (function() {
     missingStarters.forEach(injured => {
       const available = squad.filter(p =>
         !selected.includes(p) &&
+        !lockedXI.starters.includes(p.id) && // don't pick another locked starter as replacement
         !(tournament.playerForms[p.id] && tournament.playerForms[p.id].isInjured)
       );
       if (available.length === 0) return;
 
-      // Same role first
       const sameRole = available.filter(p => p.role === injured.role);
       const pool = sameRole.length > 0 ? sameRole : available;
 
-      // Respect overseas limit (max 4)
       const overseasCount = selected.filter(p => p.isOverseas).length;
       const eligiblePool = overseasCount >= 4 ? pool.filter(p => !p.isOverseas) : pool;
       const finalPool = eligiblePool.length > 0 ? eligiblePool : pool;
 
-      // Pick best-rated from eligible
       finalPool.sort((a, b) => ratePlayer(b) - ratePlayer(a));
       selected.push(finalPool[0]);
     });
@@ -375,10 +377,10 @@ window.SimulationEngine = (function() {
       selected.push(rest[0]);
     }
 
-    // Impact player: use saved choice if not injured and not in XI already
+    // Impact player: use locked choice if not injured
     let impactPlayer = null;
-    if (userXI.impactPlayer) {
-      const imp = squad.find(p => p.id === userXI.impactPlayer);
+    if (lockedXI.impactPlayer) {
+      const imp = squad.find(p => p.id === lockedXI.impactPlayer);
       if (imp && !selected.includes(imp)) {
         const impForm = tournament.playerForms[imp.id];
         if (!impForm || !impForm.isInjured) {
@@ -387,7 +389,7 @@ window.SimulationEngine = (function() {
       }
     }
 
-    // Fallback impact: best available bench player
+    // Fallback impact: best bench player
     if (!impactPlayer) {
       const bench = squad.filter(p =>
         !selected.includes(p) &&
@@ -426,14 +428,25 @@ window.SimulationEngine = (function() {
 
   // Select Playing XI + Impact Player substitute
   // Returns { playing11, impactPlayer, overseasInXI }
+  // XI is LOCKED for the entire tournament — only injury replacements change it
   function selectPlaying11(teamId) {
     const ts = tournament.teamStates[teamId];
     const squad = ts.squad.map(s => s.player);
 
-    // Check if user has saved an XI for this team
+    // If this team already has a locked XI, use it with injury subs
+    if (tournament.lockedXIs[teamId]) {
+      return applyLockedXI(teamId, squad, tournament.lockedXIs[teamId]);
+    }
+
+    // Check if user has saved an XI for this team (first match — lock it)
     const userXI = window.userXISelections && window.userXISelections[teamId];
     if (userXI && userXI.starters && userXI.starters.length === 11) {
-      return selectUserXI(teamId, squad, userXI);
+      // Lock this XI for all future matches
+      tournament.lockedXIs[teamId] = {
+        starters: [...userXI.starters],
+        impactPlayer: userXI.impactPlayer
+      };
+      return applyLockedXI(teamId, squad, tournament.lockedXIs[teamId]);
     }
 
     // Filter out injured
@@ -535,7 +548,12 @@ window.SimulationEngine = (function() {
       }
     }
 
-    // Store impact player info on tournament for this match
+    // LOCK this XI for all future matches (AI teams + first-time human teams)
+    tournament.lockedXIs[teamId] = {
+      starters: selected.map(p => p.id),
+      impactPlayer: impactPlayer ? impactPlayer.id : null
+    };
+
     return { playing11: selected, impactPlayer, overseasInXI };
   }
 

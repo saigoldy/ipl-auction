@@ -700,6 +700,8 @@ window.App = (function() {
   // ===== PLAYING XI SETUP =====
   const userXISelections = {}; // teamId -> { starters: [...playerIds], impactPlayer: playerId }
   let currentXITeam = null;
+  let xiCountdownTimer = null;
+  let xiConfirmedTeams = new Set(); // tracks which teams have confirmed XI (online)
 
   function showPlayingXISetup() {
     // Get human teams that need XI setup
@@ -732,6 +734,42 @@ window.App = (function() {
     showScreen('xi-setup');
     renderXITeamTabs(teamsToSetup);
     renderXISetup();
+
+    // In online mode, host starts 2-min countdown for XI setup
+    if (window.onlineMode && window.Lobby && Lobby.isHost()) {
+      const deadline = Date.now() + 120000; // 2 minutes
+      Lobby.broadcastGameState('xi_setup_start', { deadline });
+      startXICountdown(deadline);
+    }
+  }
+
+  function startXICountdown(deadline) {
+    // Show countdown on UI
+    const wrap = document.getElementById('xi-countdown-wrap');
+    if (wrap) wrap.style.display = 'block';
+    if (xiCountdownTimer) clearInterval(xiCountdownTimer);
+
+    xiCountdownTimer = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      const mins = Math.floor(remaining / 60);
+      const secs = remaining % 60;
+      const timerEl = document.getElementById('xi-countdown');
+      if (timerEl) timerEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+
+      if (remaining <= 0) {
+        clearInterval(xiCountdownTimer);
+        xiCountdownTimer = null;
+        // Auto-confirm own XI if not yet confirmed
+        if (window.myOnlineTeamId && !xiConfirmedTeams.has(window.myOnlineTeamId)) {
+          confirmXI();
+        }
+        // HOST: timer expired — force start even if some players didn't confirm
+        if (window.onlineMode && window.Lobby && Lobby.isHost()) {
+          Lobby.broadcastGameState('xi_setup_done', { allXIs: window.userXISelections || {} });
+          startTournament();
+        }
+      }
+    }, 1000);
   }
 
   function autoSelectXIForTeam(teamId) {
@@ -739,39 +777,59 @@ window.App = (function() {
     if (!ts) return { starters: [], impactPlayer: null };
     const squad = ts.squad.map(s => s.player);
 
-    // Sort by rating
+    // Role-specific rating (batting for batters, bowling for bowlers)
     const rate = p => {
-      const primary = p.role === 'bowler' ? p.stats.bowling :
-                       p.role === 'allRounder' ? (p.stats.batting + p.stats.bowling) / 2 :
-                       p.stats.batting;
-      return primary;
+      if (p.role === 'bowler') return p.stats.bowling || 0;
+      if (p.role === 'allRounder') return ((p.stats.batting || 0) + (p.stats.bowling || 0)) / 2;
+      return p.stats.batting || 0;
     };
 
-    const indians = squad.filter(p => !p.isOverseas).sort((a, b) => rate(b) - rate(a));
-    const overseas = squad.filter(p => p.isOverseas).sort((a, b) => rate(b) - rate(a));
+    // Bucket by role
+    const wks = squad.filter(p => p.role === 'wicketkeeper').sort((a, b) => rate(b) - rate(a));
+    const batters = squad.filter(p => p.role === 'batter').sort((a, b) => rate(b) - rate(a));
+    const allRounders = squad.filter(p => p.role === 'allRounder').sort((a, b) => rate(b) - rate(a));
+    const bowlers = squad.filter(p => p.role === 'bowler').sort((a, b) => rate(b) - rate(a));
 
     const selected = [];
-    // Max 4 overseas
-    selected.push(...overseas.slice(0, 4));
-    // Fill with best Indians
-    const indianPool = [...indians];
-    // Ensure WK
-    if (!selected.some(p => p.role === 'wicketkeeper')) {
-      const wk = indianPool.find(p => p.role === 'wicketkeeper');
-      if (wk) { selected.push(wk); indianPool.splice(indianPool.indexOf(wk), 1); }
+    const pickedIds = new Set();
+    function tryPick(p) {
+      if (!p || pickedIds.has(p.id)) return false;
+      const overseasCount = selected.filter(x => x.isOverseas).length;
+      if (p.isOverseas && overseasCount >= 4) return false;
+      selected.push(p); pickedIds.add(p.id); return true;
     }
-    // Ensure 5 bowlers
-    while (selected.filter(p => p.role === 'bowler' || p.role === 'allRounder').length < 5 && indianPool.length) {
-      const bowler = indianPool.find(p => p.role === 'bowler' || p.role === 'allRounder');
-      if (bowler) { selected.push(bowler); indianPool.splice(indianPool.indexOf(bowler), 1); }
-      else break;
-    }
-    // Fill rest
-    while (selected.length < 11 && indianPool.length) selected.push(indianPool.shift());
 
-    // Impact player: best remaining player (Indian if 4 overseas in XI)
+    // 1 WK (best available)
+    if (wks[0]) tryPick(wks[0]);
+
+    // 4 batters (prefer 2 top-order, 1 middle, 1 finisher)
+    const topOrder = batters.filter(p => p.subRole === 'top-order');
+    const middleOrder = batters.filter(p => p.subRole === 'middle-order');
+    const finishers = batters.filter(p => p.subRole === 'finisher');
+    const otherBatters = batters.filter(p => !['top-order','middle-order','finisher'].includes(p.subRole));
+    let battersPicked = 0;
+    for (const p of topOrder) { if (battersPicked >= 2) break; if (tryPick(p)) battersPicked++; }
+    for (const p of middleOrder) { if (battersPicked >= 3) break; if (tryPick(p)) battersPicked++; }
+    for (const p of finishers) { if (battersPicked >= 4) break; if (tryPick(p)) battersPicked++; }
+    for (const p of [...topOrder, ...middleOrder, ...finishers, ...otherBatters]) {
+      if (battersPicked >= 4) break; if (tryPick(p)) battersPicked++;
+    }
+
+    // 2 all-rounders
+    let arPicked = 0;
+    for (const p of allRounders) { if (arPicked >= 2) break; if (tryPick(p)) arPicked++; }
+
+    // 4 bowlers
+    let bowlersPicked = 0;
+    for (const p of bowlers) { if (bowlersPicked >= 4) break; if (tryPick(p)) bowlersPicked++; }
+
+    // Fill any remaining slots with best available
+    const allRanked = squad.slice().sort((a, b) => rate(b) - rate(a));
+    for (const p of allRanked) { if (selected.length >= 11) break; tryPick(p); }
+
+    // Impact player: best bench player (prefer filling weakness)
     const overseasInXI = selected.filter(p => p.isOverseas).length;
-    const bench = squad.filter(p => !selected.includes(p)).sort((a, b) => rate(b) - rate(a));
+    const bench = squad.filter(p => !pickedIds.has(p.id)).sort((a, b) => rate(b) - rate(a));
     const eligibleImpact = overseasInXI >= 4 ? bench.filter(p => !p.isOverseas) : bench;
     const impactPlayer = eligibleImpact.length > 0 ? eligibleImpact[0].id : null;
 
@@ -918,13 +976,48 @@ window.App = (function() {
 
   function confirmXI() {
     // Pass XI selections to simulation engine
-    window.userXISelections = userXISelections;
+    window.userXISelections = window.userXISelections || {};
+    Object.assign(window.userXISelections, userXISelections);
+
+    // ONLINE: broadcast MY XI to host + all clients
+    if (window.onlineMode && window.Lobby && window.myOnlineTeamId) {
+      const myTeamId = window.myOnlineTeamId;
+      const myXI = userXISelections[myTeamId];
+      if (myXI) {
+        Lobby.broadcastGameState('xi_confirmed', {
+          teamId: myTeamId,
+          starters: myXI.starters,
+          impactPlayer: myXI.impactPlayer
+        });
+        xiConfirmedTeams.add(myTeamId);
+
+        // Disable confirm button to show it's done
+        const btn = document.getElementById('btn-confirm-xi');
+        if (btn) { btn.textContent = 'XI Confirmed! Waiting for others...'; btn.disabled = true; }
+
+        // If host and all human teams confirmed, start immediately
+        if (Lobby.isHost()) {
+          checkAllXIConfirmedAndStart();
+        }
+        return; // don't start tournament yet — wait for all XIs or timer
+      }
+    }
+
+    // OFFLINE: start immediately
     saveGame('tournament');
-    startTournamentWithXI();
+    startTournament();
   }
 
-  function startTournamentWithXI() {
-    startTournament();
+  function checkAllXIConfirmedAndStart() {
+    const states = AuctionEngine.getAllTeamStates();
+    const humanTeamIds = TEAMS.filter(t => states[t.id] && states[t.id].isHuman).map(t => t.id);
+    const allConfirmed = humanTeamIds.every(tid => xiConfirmedTeams.has(tid));
+    if (allConfirmed) {
+      if (xiCountdownTimer) { clearInterval(xiCountdownTimer); xiCountdownTimer = null; }
+      // Broadcast that XI setup is done
+      Lobby.broadcastGameState('xi_setup_done', { allXIs: window.userXISelections });
+      startTournament();
+    }
   }
 
   // ===== TOURNAMENT =====
@@ -952,7 +1045,9 @@ window.App = (function() {
         schedule: simState.schedule,
         standings: simState.standings,
         playerForms: simState.playerForms,
-        teamStates: states
+        teamStates: states,
+        lockedXIs: simState.lockedXIs || {},
+        userXISelections: window.userXISelections || {}
       });
     }
   }
@@ -1406,6 +1501,37 @@ window.App = (function() {
       case 'auction_end':
         onAuctionEnd();
         break;
+      case 'xi_confirmed':
+        // Another player confirmed their XI — store it
+        if (payload.teamId && payload.starters) {
+          if (!window.userXISelections) window.userXISelections = {};
+          window.userXISelections[payload.teamId] = {
+            starters: payload.starters,
+            impactPlayer: payload.impactPlayer || null
+          };
+          xiConfirmedTeams.add(payload.teamId);
+          console.log('[XI] Received XI from team', payload.teamId);
+          // Host: check if all human teams confirmed
+          if (window.onlineMode && window.Lobby && Lobby.isHost()) {
+            checkAllXIConfirmedAndStart();
+          }
+        }
+        break;
+      case 'xi_setup_start':
+        // Non-host: start the countdown timer
+        if (payload.deadline) {
+          startXICountdown(payload.deadline);
+        }
+        break;
+      case 'xi_setup_done':
+        // Host says all XIs confirmed — merge any received XIs and start tournament
+        if (payload.allXIs) {
+          window.userXISelections = window.userXISelections || {};
+          Object.assign(window.userXISelections, payload.allXIs);
+        }
+        if (xiCountdownTimer) { clearInterval(xiCountdownTimer); xiCountdownTimer = null; }
+        // Non-host: tournament will start via sim_init broadcast
+        break;
       case 'sim_init':
         // Non-host receives the tournament schedule from host
         if (payload.schedule) {
@@ -1433,8 +1559,17 @@ window.App = (function() {
             simState.playerForms = payload.playerForms;
             simState.completedMatches = [];
             simState.currentMatch = 0;
+            // Restore locked XIs from host (centralized XI for all teams)
+            if (payload.lockedXIs) simState.lockedXIs = payload.lockedXIs;
+            // Restore user XI selections from host
+            if (payload.userXISelections) {
+              window.userXISelections = window.userXISelections || {};
+              Object.assign(window.userXISelections, payload.userXISelections);
+            }
           }
           renderPointsTable();
+          showScreen('tournament');
+          hideSimButtonsForNonHost();
           const matchCounter = document.getElementById('match-counter');
           if (matchCounter) matchCounter.textContent = `Match 1 of ${payload.schedule.length}`;
           console.log('[SIM] Tournament initialized from host');

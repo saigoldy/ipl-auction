@@ -260,6 +260,8 @@
     <div class="xi-teams-tabs" id="xi-teams-tabs"></div>
     <div class="xi-setup-info" id="xi-setup-info">
       <p>Select 11 starters (max 4 overseas) + 1 Impact Player from 4 subs</p>
+      <p id="xi-countdown-wrap" style="display:none;font-size:18px;color:var(--gold);font-weight:bold;margin-top:4px">Time remaining: <span id="xi-countdown">2:00</span></p>
+      <p style="font-size:12px;color:var(--text-dim);margin-top:2px">This XI stays fixed for all matches. Injured players get auto-replaced and return when fit.</p>
     </div>
     <div class="xi-layout">
       <div class="xi-starters-panel">
@@ -892,6 +894,11 @@
         // Update simulate button visibility
         if (typeof updateSimulateButtonVisibility === 'function') updateSimulateButtonVisibility();
       };
+
+      // XI setup events (online: players broadcast their XI to host)
+      Lobby.callbacks.onXIConfirmed = (payload) => App.handleOnlineEvent('xi_confirmed', payload);
+      Lobby.callbacks.onXISetupStart = (payload) => App.handleOnlineEvent('xi_setup_start', payload);
+      Lobby.callbacks.onXISetupDone = (payload) => App.handleOnlineEvent('xi_setup_done', payload);
 
       // Centralized simulation events
       Lobby.callbacks.onSimInit = (payload) => App.handleOnlineEvent('sim_init', payload);

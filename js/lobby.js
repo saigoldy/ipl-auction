@@ -384,6 +384,21 @@ window.Lobby = (function() {
       if (Lobby.callbacks.onSimPlayoffResult) Lobby.callbacks.onSimPlayoffResult(payload);
     });
 
+    // XI confirmed by a player (broadcast to host + all clients)
+    realtimeChannel.on('broadcast', { event: 'xi_confirmed' }, ({ payload }) => {
+      if (Lobby.callbacks.onXIConfirmed) Lobby.callbacks.onXIConfirmed(payload);
+    });
+
+    // Host signals XI setup phase started (with countdown)
+    realtimeChannel.on('broadcast', { event: 'xi_setup_start' }, ({ payload }) => {
+      if (Lobby.callbacks.onXISetupStart) Lobby.callbacks.onXISetupStart(payload);
+    });
+
+    // Host signals XI setup phase ended, tournament starting
+    realtimeChannel.on('broadcast', { event: 'xi_setup_done' }, ({ payload }) => {
+      if (Lobby.callbacks.onXISetupDone) Lobby.callbacks.onXISetupDone(payload);
+    });
+
     // Resync: client requests current state from host
     realtimeChannel.on('broadcast', { event: 'request_state' }, ({ payload }) => {
       if (Lobby.callbacks.onRequestState) Lobby.callbacks.onRequestState(payload);

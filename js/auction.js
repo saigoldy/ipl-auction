@@ -1164,6 +1164,38 @@ window.AuctionEngine = (function() {
       if (!anyFilled) break;
     }
 
+    // SECOND PASS: ensure each team has minimum batters/WK to field a real XI
+    // Required: at least 4 batters, 1 WK, 4 bowlers, 2 ARs — otherwise XI becomes absurd
+    const MIN_BY_ROLE = { batter: 4, wicketkeeper: 1, bowler: 4, allRounder: 2 };
+    const allSquadPlayerIds = new Set();
+    TEAMS.forEach(t => state.teamStates[t.id].squad.forEach(s => allSquadPlayerIds.add(s.player.id)));
+    const unassignedPool = PLAYERS.filter(p => !allSquadPlayerIds.has(p.id));
+
+    TEAMS.forEach(t => {
+      const ts = state.teamStates[t.id];
+      Object.keys(MIN_BY_ROLE).forEach(role => {
+        const have = ts.roleCount[role] || 0;
+        const need = MIN_BY_ROLE[role] - have;
+        if (need <= 0) return;
+        for (let i = 0; i < need; i++) {
+          // Find an unassigned player of this role (Indian preferred, overseas OK if under limit)
+          const idx = unassignedPool.findIndex(p => p.role === role &&
+            (!p.isOverseas || ts.overseasCount < 8));
+          if (idx === -1) break;
+          const player = unassignedPool.splice(idx, 1)[0];
+          ts.squad.push({ player, price: 0 });
+          ts.filled++;
+          ts.roleCount[player.role] = (ts.roleCount[player.role] || 0) + 1;
+          ts.subRoleCount[player.subRole] = (ts.subRoleCount[player.subRole] || 0) + 1;
+          if (player.isOverseas) {
+            ts.overseasCount++;
+            ts.overseasByRole[player.role] = (ts.overseasByRole[player.role] || 0) + 1;
+          }
+          state.soldPlayers.push({ player, teamId: t.id, price: 0 });
+        }
+      });
+    });
+
     // Log any teams that still couldn't reach 18 (shouldn't happen with 235+ players)
     TEAMS.forEach(t => {
       const ts = state.teamStates[t.id];
